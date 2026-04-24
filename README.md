@@ -4,9 +4,12 @@ YouTube-native AI ecosystem — ingests your watch history, indexes transcripts,
 harvests live web surfaces, learns your consent predictively, and runs across
 chat / dashboard / ambient / phone as one core with four faces.
 
-> **Status:** foundation complete. 32/32 tests green. Web app + backend API +
-> Chrome extension shipping together. Built on Dell Precision 5560 (Nvidia T1200
-> 4GB, 64GB RAM, Windows 11, no-USB) with risk tolerance 3/10.
+**🌐 Live: https://yt-brain-ui.vercel.app**
+**📦 Repo: https://github.com/apkaravapk-a11y/yt-brain**
+
+> **Status:** foundation complete. 32/32 tests green. Web app deployed to Vercel.
+> Backend API + Chrome extension shipping together. Built on Dell Precision 5560
+> (Nvidia T1200 4GB, 64GB RAM, Windows 11, no-USB) with risk tolerance 3/10.
 
 ## What's inside
 
