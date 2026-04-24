@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useStore } from "../lib/store";
+import { useLiveStore } from "../lib/store";
 
 const SIM_LINES: [string, string][] = [
   ["browser.goto", "https://youtube.com/"],
@@ -16,25 +16,54 @@ const SIM_LINES: [string, string][] = [
 ];
 
 export default function CoPilot() {
-  const { events, pushEvent } = useStore();
+  // A3: use selectors so this component only re-renders when events change.
+  const events = useLiveStore((s) => s.events);
+  const pushEvent = useLiveStore((s) => s.pushEvent);
+
   const [input, setInput] = useState("");
   const [liveBackend, setLiveBackend] = useState(false);
   const viewportRef = useRef<HTMLDivElement | null>(null);
 
+  // A2 + A4: proper cleanup for both timers + visibility gating so the stream
+  // pauses when the tab is hidden and doesn't leak intervals across remounts.
   useEffect(() => {
-    // When the WebSocket lands events, we'll see them in `events`.
-    // If none within 3s, start a local simulation loop so the page never looks dead.
-    const t = setTimeout(() => {
-      if (events.length > 0) { setLiveBackend(true); return; }
-      let i = 0;
-      const iv = setInterval(() => {
-        const [tag, text] = SIM_LINES[i % SIM_LINES.length];
-        pushEvent({ t: Date.now(), tag, text });
-        i++;
-      }, 2000);
-      return () => clearInterval(iv);
+    let intervalId: number | null = null;
+    let timeoutId: number | null = null;
+    let i = 0;
+
+    const tick = () => {
+      if (document.visibilityState !== "visible") return;
+      const [tag, text] = SIM_LINES[i % SIM_LINES.length];
+      pushEvent({ t: Date.now(), tag, text });
+      i += 1;
+    };
+
+    timeoutId = window.setTimeout(() => {
+      if (events.length > 0) {
+        setLiveBackend(true);
+        return;
+      }
+      // only start the sim if the backend hasn't produced anything
+      intervalId = window.setInterval(tick, 2000);
     }, 3000);
-    return () => clearTimeout(t);
+
+    const onVis = () => {
+      if (document.visibilityState === "visible" && intervalId === null) {
+        // resume the sim if we were paused mid-hidden
+        intervalId = window.setInterval(tick, 2000);
+      } else if (document.visibilityState !== "visible" && intervalId !== null) {
+        window.clearInterval(intervalId);
+        intervalId = null;
+      }
+    };
+    document.addEventListener("visibilitychange", onVis);
+
+    return () => {
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+      if (intervalId !== null) window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+    // Deliberately not re-creating on `events` change — we set up once per mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -53,7 +82,7 @@ export default function CoPilot() {
       <div className="flex items-center gap-3 mb-3">
         <h2 className="text-xl m-0">Live Co-Pilot</h2>
         <span className={`text-xs ${liveBackend ? "text-ok" : "text-warn"}`}>
-          {liveBackend ? "● WebSocket attached" : "● backend offline — simulating"}
+          {liveBackend ? "● WebSocket attached" : "● simulating"}
         </span>
       </div>
       <div
@@ -61,7 +90,7 @@ export default function CoPilot() {
         className="flex-1 bg-panel border border-border rounded p-4 overflow-y-auto text-xs"
       >
         {events.slice().reverse().map((e, i) => (
-          <div key={i} className="py-0.5">
+          <div key={`${e.t}-${i}`} className="py-0.5">
             <span className="text-accent">[{e.tag}]</span>{" "}
             <span className="text-text">{e.text}</span>
           </div>

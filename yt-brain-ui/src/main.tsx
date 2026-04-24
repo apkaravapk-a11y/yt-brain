@@ -4,10 +4,13 @@ import { BrowserRouter } from "react-router-dom";
 import "./index.css";
 import App from "./App";
 
+// A1: StrictMode only in dev — production runs single-mount for no double-effect flicker.
+const tree = (
+  <BrowserRouter>
+    <App />
+  </BrowserRouter>
+);
+
 createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
-  </StrictMode>,
+  import.meta.env.DEV ? <StrictMode>{tree}</StrictMode> : tree,
 );

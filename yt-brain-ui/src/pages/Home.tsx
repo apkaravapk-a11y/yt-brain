@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api, type Video } from "../lib/api";
 
 const FALLBACK: Video[] = [
@@ -16,11 +16,24 @@ const FALLBACK: Video[] = [
   { video_id: "d2", title: "Trending — AI Agents this week", channel_name: "Ψ-trending", source: "psi_trending" },
 ];
 
+// A6: hoist the pill resolver out of the render path.
+const SOURCE_PILL: Record<string, string> = {
+  psi_home: "live",
+  psi_trending: "live",
+  psi_history: "live",
+  psi_subs: "live",
+  psi_library: "live",
+  psi_search: "live",
+  psi_channel: "live",
+  psi_watch: "live",
+  takeout: "trusted",
+  youtube_api: "trusted",
+  live_visit: "live",
+  mobile_feed: "caution",
+  yt_dlp: "caution",
+};
 function sourcePill(source: string) {
-  if (source.startsWith("psi_")) return "live";
-  if (source === "takeout") return "trusted";
-  if (source === "youtube_api") return "trusted";
-  return "caution";
+  return SOURCE_PILL[source] ?? "caution";
 }
 
 export default function Home() {
@@ -29,17 +42,24 @@ export default function Home() {
   const [liveBackend, setLiveBackend] = useState(false);
 
   useEffect(() => {
+    let alive = true;
     api.videos()
       .then((v) => {
+        if (!alive) return;
         if (v.length) { setVideos(v); setLiveBackend(true); }
       })
       .catch(() => { /* fall back to sample data */ });
+    return () => { alive = false; };
   }, []);
 
-  const filtered = videos.filter((v) =>
-    !q || v.title.toLowerCase().includes(q.toLowerCase()) ||
-    v.channel_name.toLowerCase().includes(q.toLowerCase()),
-  );
+  // A6: memoize the filtered list.
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return videos;
+    return videos.filter(
+      (v) => v.title.toLowerCase().includes(needle) || v.channel_name.toLowerCase().includes(needle),
+    );
+  }, [videos, q]);
 
   return (
     <div className="p-4">

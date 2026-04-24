@@ -2,13 +2,22 @@
 
 Serves the React app (yt-brain-ui) and the Chrome extension. All business
 logic delegates to services/ — this file is a thin adapter.
+
+Perf remediation pass (Batch C):
+- C1: /api/status caches the AI-probe result for 30 s and probes concurrently.
+- C4: /api/live/visit endpoint wired for the Chrome extension.
+- C5: deprecated on_event startup replaced with lifespan context manager.
+- C6: datetime.utcnow() replaced with datetime.now(timezone.utc).
+- C8: CORS origins driven by YT_BRAIN_CORS_ORIGINS env.
 """
 from __future__ import annotations
 import asyncio
+import contextlib
 import json
 import os
-import subprocess
-from datetime import datetime
+import re
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -23,17 +32,34 @@ from ..services import search as search_svc
 from ..consent.policy import ConsentPolicy
 from ..consent.predictor import HeuristicPredictor
 from ..consent.windows import WindowRegistry
-from ..modes.router import current_mode, set_mode, MODES, MODE_TABLE
+from ..modes.router import current_mode, set_mode, MODES
+from ..sources.models import VideoRecord
 
 DB_PATH = Path(os.environ.get("YT_BRAIN_DB", Path.home() / ".yt-brain" / "yt_brain.sqlite"))
 UI_DIST = Path(__file__).resolve().parents[4] / "yt-brain-ui" / "dist"
 
-app = FastAPI(title="yt-brain", version="0.1.0")
 
+@contextlib.asynccontextmanager
+async def lifespan(_: FastAPI):
+    # One-shot: warm the repo + initial AI-probe so the first real request is fast.
+    _get_repo()
+    await _refresh_ai_status_cache()
+    yield
+
+
+app = FastAPI(title="yt-brain", version="0.2.0", lifespan=lifespan)
+
+_cors_env = os.environ.get("YT_BRAIN_CORS_ORIGINS", "").strip()
+_default_origins = [
+    "http://127.0.0.1:5173",
+    "http://localhost:5173",
+    "https://yt-brain-ui.vercel.app",
+]
+origins = [o.strip() for o in _cors_env.split(",") if o.strip()] or _default_origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],                # dev convenience; lock down for prod
-    allow_methods=["*"],
+    allow_origins=origins,
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
     allow_credentials=False,
 )
@@ -49,39 +75,75 @@ def _get_repo() -> Repo:
     return _repo
 
 
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+# ---------- AI status cache (C1) ----------
+
+_AI_TTL = 30.0  # seconds
+_ai_cache: dict[str, Any] = {"at": 0.0, "data": None}
+_ai_lock = asyncio.Lock()
+
+
+async def _probe_url(client, url: str) -> bool:
+    try:
+        r = await client.get(url, timeout=0.8)
+        return r.status_code == 200
+    except Exception:
+        return False
+
+
+async def _refresh_ai_status_cache() -> dict[str, Any]:
+    import httpx
+    async with httpx.AsyncClient() as client:
+        yt_ai, ollama = await asyncio.gather(
+            _probe_url(client, "http://127.0.0.1:11435/v1/status"),
+            _probe_url(client, "http://127.0.0.1:11434/api/tags"),
+        )
+    backends = [
+        {"name": "yt_ai_router", "available": yt_ai},
+        {"name": "ollama", "available": ollama},
+        {"name": "anthropic_cloud", "available": bool(os.environ.get("ANTHROPIC_API_KEY"))},
+        {"name": "stub", "available": True},
+    ]
+    data = {
+        "backends": backends,
+        "ai_router": "ok" if yt_ai else ("stub" if backends[-1]["available"] else "down"),
+    }
+    _ai_cache["at"] = time.monotonic()
+    _ai_cache["data"] = data
+    return data
+
+
+async def _ai_status_cached() -> dict[str, Any]:
+    if _ai_cache["data"] is not None and (time.monotonic() - _ai_cache["at"]) < _AI_TTL:
+        return _ai_cache["data"]
+    async with _ai_lock:
+        # Re-check under the lock in case another caller already refreshed.
+        if _ai_cache["data"] is not None and (time.monotonic() - _ai_cache["at"]) < _AI_TTL:
+            return _ai_cache["data"]
+        return await _refresh_ai_status_cache()
+
+
 # ---------- REST ----------
 
 class ModeSetBody(BaseModel):
     name: str
 
 
-def _ai_status() -> dict[str, Any]:
-    """Ping the yt-ai router + Ollama directly. Both optional."""
-    backends: list[dict[str, bool | str]] = []
-    # yt-ai router
-    try:
-        import httpx
-        r = httpx.get("http://127.0.0.1:11435/v1/status", timeout=0.8)
-        avail = r.status_code == 200
-    except Exception:
-        avail = False
-    backends.append({"name": "yt_ai_router", "available": avail})
-    # ollama direct
-    try:
-        import httpx
-        r = httpx.get("http://127.0.0.1:11434/api/tags", timeout=0.8)
-        avail = r.status_code == 200
-    except Exception:
-        avail = False
-    backends.append({"name": "ollama", "available": avail})
-    backends.append({"name": "anthropic_cloud", "available": bool(os.environ.get("ANTHROPIC_API_KEY"))})
-    backends.append({"name": "stub", "available": True})
-    return {"backends": backends,
-            "ai_router": "ok" if backends[0]["available"] else ("stub" if backends[-1]["available"] else "down")}
+class IngestTakeoutBody(BaseModel):
+    archive: str
+
+
+class LiveVisitBody(BaseModel):
+    url: str
+    title: str = ""
+    ts: int | float | None = None
 
 
 @app.get("/api/status")
-def status() -> dict[str, Any]:
+async def status() -> dict[str, Any]:
     repo = _get_repo()
     mode = current_mode()
     sentinels = {
@@ -95,7 +157,7 @@ def status() -> dict[str, Any]:
             ("thermal-pause", "C:/docs/.thermal-pause"),
         ]
     }
-    ai = _ai_status()
+    ai = await _ai_status_cached()
     return {
         "video_count": repo.count_videos(),
         "mode": mode.name,
@@ -104,7 +166,7 @@ def status() -> dict[str, Any]:
         "backends": ai["backends"],
         "ai_router": ai["ai_router"],
         "db_path": str(DB_PATH),
-        "ts": datetime.utcnow().isoformat() + "Z",
+        "ts": _now_iso(),
     }
 
 
@@ -138,12 +200,8 @@ def mode_list() -> list[str]:
 
 
 @app.get("/api/ai/status")
-def ai_status() -> dict[str, Any]:
-    return _ai_status()
-
-
-class IngestTakeoutBody(BaseModel):
-    archive: str
+async def ai_status() -> dict[str, Any]:
+    return await _ai_status_cached()
 
 
 @app.post("/api/ingest/takeout")
@@ -151,6 +209,29 @@ def ingest_takeout(body: IngestTakeoutBody) -> dict[str, Any]:
     repo = _get_repo()
     up, skip = sync_svc.ingest_takeout(repo, body.archive)
     return {"inserted_or_updated": up, "skipped": skip}
+
+
+# C4: live visit from the Chrome extension.
+_VIDEO_URL_RE = re.compile(r"[?&]v=([A-Za-z0-9_-]{11})")
+
+
+@app.post("/api/live/visit")
+async def live_visit(body: LiveVisitBody) -> dict[str, Any]:
+    m = _VIDEO_URL_RE.search(body.url or "")
+    if not m:
+        return {"ok": False, "reason": "no video id in url"}
+    vid = m.group(1)
+    title = (body.title or "").replace(" - YouTube", "").strip()
+    repo = _get_repo()
+    repo.upsert_video(VideoRecord(
+        video_id=vid, title=title, url=body.url,
+        source="live_visit", watched_at=datetime.now(timezone.utc),
+    ))
+    await hub.broadcast({
+        "tag": "live.visit",
+        "text": f"{vid} — {title[:80]}",
+    })
+    return {"ok": True, "video_id": vid}
 
 
 # ---------- WebSocket live stream ----------
@@ -167,10 +248,13 @@ class LiveHub:
         self.clients.discard(ws)
 
     async def broadcast(self, event: dict[str, Any]):
+        if not self.clients:
+            return
+        payload = json.dumps(event)
         dead: list[WebSocket] = []
         for c in self.clients:
             try:
-                await c.send_text(json.dumps(event))
+                await c.send_text(payload)
             except Exception:
                 dead.append(c)
         for d in dead:
@@ -184,26 +268,12 @@ hub = LiveHub()
 async def ws_live(ws: WebSocket):
     await hub.connect(ws)
     try:
-        # heartbeat
         await ws.send_text(json.dumps({"tag": "connect", "text": "live stream attached"}))
         while True:
-            # Echo any client message back as a 'chat' event
             data = await ws.receive_text()
             await hub.broadcast({"tag": "chat", "text": data})
     except WebSocketDisconnect:
         hub.disconnect(ws)
-
-
-# Background heartbeat — nudge UI every 30s so clients know we're alive
-@app.on_event("startup")
-async def _heartbeat_loop():
-    async def loop():
-        n = 0
-        while True:
-            await asyncio.sleep(30)
-            n += 1
-            await hub.broadcast({"tag": "heartbeat", "text": f"tick {n}"})
-    asyncio.create_task(loop())
 
 
 # ---------- Static UI mount ----------

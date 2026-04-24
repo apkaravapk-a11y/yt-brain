@@ -1,15 +1,31 @@
 // Single API client for the yt-brain backend. Hits the Python FastAPI server
-// in dev, same-origin in prod (Vercel proxies /api/* to the backend).
+// in dev; in prod (Vercel) `VITE_API_BASE` is empty and we short-circuit to
+// offline fallbacks so the page never hangs on a failed fetch.
 
-export const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:11811";
+export const API_BASE = import.meta.env.VITE_API_BASE || "";
+const DEFAULT_DEV_BASE = "http://127.0.0.1:11811";
+const EFFECTIVE_BASE = API_BASE || (import.meta.env.DEV ? DEFAULT_DEV_BASE : "");
+export const BACKEND_CONFIGURED = EFFECTIVE_BASE !== "";
 
-async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
-  });
-  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
-  return r.json();
+class OfflineError extends Error {
+  constructor() { super("backend not configured"); }
+}
+
+async function req<T>(path: string, init?: RequestInit, timeoutMs = 3500): Promise<T> {
+  if (!BACKEND_CONFIGURED) throw new OfflineError();
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const r = await fetch(`${EFFECTIVE_BASE}${path}`, {
+      ...init,
+      signal: ctrl.signal,
+      headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
+    });
+    if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    return r.json();
+  } finally {
+    clearTimeout(t);
+  }
 }
 
 export interface Video {
@@ -59,14 +75,18 @@ export const api = {
   },
 };
 
-// WebSocket for live events
+// WebSocket for live events. Returns null if backend isn't configured — callers
+// should treat that as "offline" and run their local simulation.
 export function connectLive(onEvent: (ev: any) => void): WebSocket | null {
+  if (!BACKEND_CONFIGURED) return null;
   try {
-    const wsUrl = API_BASE.replace(/^http/, "ws") + "/ws/live";
+    const wsUrl = EFFECTIVE_BASE.replace(/^http/, "ws") + "/ws/live";
     const ws = new WebSocket(wsUrl);
     ws.onmessage = (m) => {
       try { onEvent(JSON.parse(m.data)); } catch { /* ignore */ }
     };
+    // Swallow errors silently — UI already shows an offline badge.
+    ws.onerror = () => { /* noop */ };
     return ws;
   } catch {
     return null;

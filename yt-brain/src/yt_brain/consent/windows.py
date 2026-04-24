@@ -4,8 +4,12 @@ Non-persistent by design: code refuses to serialize windows beyond process lifet
 """
 from __future__ import annotations
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from threading import RLock
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 @dataclass
@@ -14,10 +18,10 @@ class Window:
     expires_at: datetime
     max_count: int | None
     used: int = 0
-    opened_at: datetime = field(default_factory=datetime.utcnow)
+    opened_at: datetime = field(default_factory=_utc_now)
 
     def is_open(self) -> bool:
-        if datetime.utcnow() >= self.expires_at:
+        if _utc_now() >= self.expires_at:
             return False
         if self.max_count is not None and self.used >= self.max_count:
             return False
@@ -32,7 +36,7 @@ class WindowRegistry:
     def open(self, action: str, duration: timedelta, max_count: int | None = None) -> Window:
         with self._lock:
             w = Window(action=action,
-                       expires_at=datetime.utcnow() + duration,
+                       expires_at=_utc_now() + duration,
                        max_count=max_count)
             self._by_action[action] = w
             return w

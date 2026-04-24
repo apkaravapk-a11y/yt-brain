@@ -5,7 +5,7 @@ Real DOM selectors land during Phase 1.5 execute; scaffold stubs validate the
 contract (HarvestResult shape) so downstream tests/adapters can be wired now.
 """
 from __future__ import annotations
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Callable
 
 from ..sources.models import HarvestResult, VideoRecord, WebEvent, Comment
@@ -16,7 +16,7 @@ Harvester = Callable[[Driver], HarvestResult]
 
 
 def _empty(surface: str) -> HarvestResult:
-    return HarvestResult(surface=surface, captured_at=datetime.utcnow())
+    return HarvestResult(surface=surface, captured_at=datetime.now(timezone.utc))
 
 
 def harvest_home(driver: Driver) -> HarvestResult:

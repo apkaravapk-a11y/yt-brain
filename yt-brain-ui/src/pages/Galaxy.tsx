@@ -1,5 +1,15 @@
 import { useEffect, useRef } from "react";
-import * as THREE from "three";
+// A5: named imports so unused Three.js submodules can tree-shake.
+import {
+  Scene,
+  Color,
+  PerspectiveCamera,
+  WebGLRenderer,
+  BufferGeometry,
+  Float32BufferAttribute,
+  PointsMaterial,
+  Points,
+} from "three";
 
 export default function Galaxy() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -10,12 +20,12 @@ export default function Galaxy() {
     const canvas = canvasRef.current;
     const wrap = wrapRef.current;
 
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0a0e1a);
-    const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 1000);
+    const scene = new Scene();
+    scene.background = new Color(0x0a0e1a);
+    const camera = new PerspectiveCamera(60, 1, 0.1, 1000);
     camera.position.z = 8;
 
-    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    const renderer = new WebGLRenderer({ canvas, antialias: true });
     const resize = () => {
       const w = wrap.clientWidth;
       const h = wrap.clientHeight;
@@ -26,7 +36,7 @@ export default function Galaxy() {
     resize();
     renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
 
-    const geometry = new THREE.BufferGeometry();
+    const geometry = new BufferGeometry();
     const pos: number[] = [];
     const col: number[] = [];
     const topicPal = [
@@ -44,10 +54,10 @@ export default function Galaxy() {
       pos.push(cz + (Math.random() - 0.5) * 1.4);
       col.push(topicPal[topic][0], topicPal[topic][1], topicPal[topic][2]);
     }
-    geometry.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-    geometry.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
-    const mat = new THREE.PointsMaterial({ size: 0.12, vertexColors: true, sizeAttenuation: true });
-    const points = new THREE.Points(geometry, mat);
+    geometry.setAttribute("position", new Float32BufferAttribute(pos, 3));
+    geometry.setAttribute("color", new Float32BufferAttribute(col, 3));
+    const mat = new PointsMaterial({ size: 0.12, vertexColors: true, sizeAttenuation: true });
+    const points = new Points(geometry, mat);
     scene.add(points);
 
     let rx = 0, ry = 0;
@@ -69,17 +79,32 @@ export default function Galaxy() {
     canvas.addEventListener("wheel", onWheel, { passive: false });
     const ro = new ResizeObserver(resize); ro.observe(wrap);
 
+    // A4: pause the RAF loop entirely when the tab is hidden.
     let raf = 0;
+    let running = true;
     const loop = () => {
+      if (!running) return;
       points.rotation.y = drag ? ry : points.rotation.y + 0.001;
       points.rotation.x = rx;
       renderer.render(scene, camera);
       raf = requestAnimationFrame(loop);
     };
+    const onVis = () => {
+      if (document.visibilityState === "visible" && !running) {
+        running = true;
+        raf = requestAnimationFrame(loop);
+      } else if (document.visibilityState !== "visible") {
+        running = false;
+        cancelAnimationFrame(raf);
+      }
+    };
+    document.addEventListener("visibilitychange", onVis);
     loop();
 
     return () => {
+      running = false;
       cancelAnimationFrame(raf);
+      document.removeEventListener("visibilitychange", onVis);
       canvas.removeEventListener("mousedown", onDown);
       window.removeEventListener("mouseup", onUp);
       window.removeEventListener("mousemove", onMove);

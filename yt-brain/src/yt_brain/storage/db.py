@@ -5,9 +5,10 @@ from higher layers.
 """
 from __future__ import annotations
 import sqlite3
+import threading
 from contextlib import contextmanager
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
@@ -33,6 +34,9 @@ CREATE TABLE IF NOT EXISTS videos (
 );
 CREATE INDEX IF NOT EXISTS idx_videos_channel ON videos(channel_id);
 CREATE INDEX IF NOT EXISTS idx_videos_source ON videos(source);
+-- C3: expression indexes for case-insensitive search.
+CREATE INDEX IF NOT EXISTS idx_videos_title_lower ON videos(LOWER(title));
+CREATE INDEX IF NOT EXISTS idx_videos_channel_lower ON videos(LOWER(channel_name));
 
 CREATE TABLE IF NOT EXISTS transcripts (
     video_id      TEXT PRIMARY KEY REFERENCES videos(video_id) ON DELETE CASCADE,
@@ -114,35 +118,56 @@ def _iso(dt: datetime | None) -> str | None:
     return dt.isoformat() if dt else None
 
 
+def _now_utc_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 class Repo:
+    """SQLite repository with a single long-lived connection (C2).
+
+    One connection per process keeps PRAGMA-setup cost out of the hot path and
+    eliminates connect/close churn on every request. All writes are serialized
+    through an RLock so threaded callers (FastAPI worker pool) stay safe.
+    """
     def __init__(self, db_path: str | Path):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.RLock()
+        self._conn: sqlite3.Connection | None = None
         self._init_schema()
 
-    def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA synchronous=NORMAL")
-        conn.execute("PRAGMA foreign_keys=ON")
-        conn.execute("PRAGMA cache_size=-32000000")  # 32 GB (negative = KB)
-        return conn
+    def _connection(self) -> sqlite3.Connection:
+        if self._conn is None:
+            conn = sqlite3.connect(self.db_path, check_same_thread=False, isolation_level=None)
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            conn.execute("PRAGMA foreign_keys=ON")
+            conn.execute("PRAGMA cache_size=-32000000")  # 32 MB (negative = KB)
+            conn.execute("PRAGMA temp_store=MEMORY")
+            self._conn = conn
+        return self._conn
 
     @contextmanager
     def tx(self):
-        conn = self._connect()
-        try:
-            yield conn
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
+        conn = self._connection()
+        with self._lock:
+            try:
+                conn.execute("BEGIN")
+                yield conn
+                conn.execute("COMMIT")
+            except Exception:
+                try:
+                    conn.execute("ROLLBACK")
+                except Exception:
+                    pass
+                raise
 
     def _init_schema(self):
-        with self.tx() as conn:
+        conn = self._connection()
+        with self._lock:
+            # autocommit mode (isolation_level=None) — executescript runs statements
+            # immediately, no explicit commit needed.
             conn.executescript(SCHEMA)
             conn.execute(
                 "INSERT OR IGNORE INTO schema_meta(key, value) VALUES('version', '1')"
@@ -172,7 +197,7 @@ class Repo:
                 (
                     v.video_id, v.title, v.channel_id, v.channel_name, v.duration_sec,
                     _iso(v.published_at), v.url, v.thumbnail_url, v.source,
-                    _iso(v.captured_at) or datetime.utcnow().isoformat(),
+                    _iso(v.captured_at) or _now_utc_iso(),
                     _iso(v.watched_at),
                     v.transcript_status, v.transcript_hash,
                     _json.dumps(v.extra or {}),
@@ -200,7 +225,7 @@ class Repo:
             conn.execute(
                 """INSERT OR REPLACE INTO transcripts(video_id, text, segments_json, fetched_at, hash)
                    VALUES(?,?,?,?,?)""",
-                (video_id, text, segments_json, datetime.utcnow().isoformat(), h),
+                (video_id, text, segments_json, _now_utc_iso(), h),
             )
             conn.execute(
                 "UPDATE videos SET transcript_status='present', transcript_hash=? WHERE video_id=?",
@@ -249,7 +274,7 @@ class Repo:
                    (ts, action, context_json, asked, user_answer, model_prediction, p, features_json)
                    VALUES(?,?,?,?,?,?,?,?)""",
                 (
-                    datetime.utcnow().isoformat(), action, _json.dumps(context),
+                    _now_utc_iso(), action, _json.dumps(context),
                     1 if asked else 0, user_answer, model_prediction, p,
                     _json.dumps(features),
                 ),

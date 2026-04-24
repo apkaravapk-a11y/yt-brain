@@ -2,7 +2,7 @@
 from __future__ import annotations
 import json
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import click
@@ -22,7 +22,7 @@ RESULTS_LOG = Path("C:/docs/results.md")
 
 def _log(entry: dict):
     RESULTS_LOG.parent.mkdir(parents=True, exist_ok=True)
-    line = f"- [{datetime.utcnow().isoformat()}Z] yt-brain {json.dumps(entry)}"
+    line = f"- [{datetime.now(timezone.utc).isoformat()}] yt-brain {json.dumps(entry)}"
     with RESULTS_LOG.open("a", encoding="utf-8") as f:
         f.write(line + "\n")
 

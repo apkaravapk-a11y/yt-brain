@@ -1,17 +1,34 @@
-"""Plain-text search over titles + transcripts. Vector search plugs in Phase 6."""
+"""Plain-text search over titles + channels. Vector search plugs in later.
+
+Batch C3: replaced the Python-side O(N) filter with a bounded SQL LIKE query.
+"""
 from __future__ import annotations
+import json
 from ..storage.db import Repo
 
 
 def search_titles(repo: Repo, query: str, limit: int = 20) -> list[dict]:
-    q = query.strip().lower()
+    q = query.strip()
     if not q:
         return []
-    hits: list[dict] = []
-    for v in repo.iter_videos():
-        hay = " ".join([v.get("title", ""), v.get("channel_name", "")]).lower()
-        if q in hay:
-            hits.append(v)
-            if len(hits) >= limit:
-                break
-    return hits
+    needle = f"%{q.lower()}%"
+    with repo.tx() as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM videos
+            WHERE LOWER(title) LIKE ? OR LOWER(channel_name) LIKE ?
+            ORDER BY COALESCE(watched_at, captured_at) DESC
+            LIMIT ?
+            """,
+            (needle, needle, int(limit)),
+        ).fetchall()
+    out: list[dict] = []
+    for r in rows:
+        d = dict(r)
+        if d.get("extra_json"):
+            try:
+                d["extra"] = json.loads(d.pop("extra_json"))
+            except Exception:
+                d.pop("extra_json", None)
+        out.append(d)
+    return out

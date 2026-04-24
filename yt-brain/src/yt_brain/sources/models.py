@@ -1,8 +1,12 @@
 """Canonical data shapes shared by every source and the storage layer."""
 from __future__ import annotations
 from dataclasses import dataclass, field, asdict
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal, Any
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 SourceName = Literal[
     "youtube_api", "takeout", "mobile_feed",
@@ -23,7 +27,7 @@ class VideoRecord:
     url: str = ""
     thumbnail_url: str = ""
     source: SourceName = "youtube_api"
-    captured_at: datetime = field(default_factory=datetime.utcnow)
+    captured_at: datetime = field(default_factory=_utc_now)
     watched_at: datetime | None = None
     transcript_status: Literal["present", "unavailable", "pending"] = "pending"
     transcript_hash: str | None = None

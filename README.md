@@ -7,9 +7,25 @@ chat / dashboard / ambient / phone as one core with four faces.
 **🌐 Live: https://yt-brain-ui.vercel.app**
 **📦 Repo: https://github.com/apkaravapk-a11y/yt-brain**
 
-> **Status:** foundation complete. 32/32 tests green. Web app deployed to Vercel.
-> Backend API + Chrome extension shipping together. Built on Dell Precision 5560
-> (Nvidia T1200 4GB, 64GB RAM, Windows 11, no-USB) with risk tolerance 3/10.
+> **Status:** foundation complete + perf pass. **36/36 tests green** (32 core + 4 API). Web app
+> deployed to Vercel. Backend API + Chrome extension shipping together. Built on
+> Dell Precision 5560 (Nvidia T1200 4GB, 64GB RAM, Windows 11, no-USB) with
+> risk tolerance 3/10.
+
+## Performance baseline (2026-04-25 remediation pass)
+
+| Metric | Before | After | Δ |
+|---|---:|---:|---|
+| Initial JS (index chunk) | 761 KB (208 KB gzip) | **7.6 KB (2.8 KB gzip)** | **−99 %** |
+| Vendor chunk split | none | react · router · three · state | ✓ |
+| `/api/status` p50 warm | ~1000 ms (probed Ollama + Anthropic sync every call) | **~120 ms** (30 s async-concurrent cache) | **~8× faster** |
+| `/api/status` p50 cold | ~1000 ms | **~650 ms** | − |
+| `search_titles` | O(N) Python scan | SQL `LIKE` on `LOWER(title)` index | O(log N) |
+| DB connections | new connect per tx + PRAGMA | pooled long-lived conn per `Repo` | − |
+| `/galaxy` refresh on Vercel | 404 | 200 via `vercel.json` rewrite | ✓ |
+| CoPilot setInterval after 10 route switches | 10 leaked | 1 | **no compounding leak** |
+| Galaxy RAF when tab hidden | always running | paused via `visibilitychange` | CPU saved |
+| Chrome ext `/api/live/visit` | endpoint missing — silent 404 | wired; broadcasts over WebSocket | ✓ |
 
 ## What's inside
 

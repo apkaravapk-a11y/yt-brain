@@ -1,4 +1,4 @@
-import { useStore } from "../lib/store";
+import { useModeStore } from "../lib/store";
 
 const MODES = [
   { name: "jarvis", persona: "ambient second-brain, proactive, witty-dry",
@@ -16,7 +16,8 @@ const MODES = [
 ];
 
 export default function Modes() {
-  const { setMode, mode } = useStore();
+  const mode = useModeStore((s) => s.mode);
+  const setMode = useModeStore((s) => s.setMode);
   return (
     <div className="p-4">
       <h2 className="text-xl m-0 mb-2">Mode Theater — 6 modes × 22 sci-fi refs</h2>
