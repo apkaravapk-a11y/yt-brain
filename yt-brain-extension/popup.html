@@ -1,0 +1,35 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>yt-brain</title>
+    <style>
+      body { font-family: ui-monospace, Consolas, monospace; background: #0a0e1a; color: #e7eaf0;
+             margin: 0; padding: 12px; width: 320px; font-size: 12px; }
+      h1 { font-size: 14px; margin: 0 0 8px; color: #4fc3f7; }
+      .row { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid #1c2440; }
+      .ok { color: #58e6a7; }
+      .bad { color: #ff6b6b; }
+      label { color: #7a8396; }
+      input { width: 100%; background: #11172a; color: #e7eaf0; border: 1px solid #1c2440;
+              padding: 6px; font-family: inherit; border-radius: 3px; }
+      button { background: #4fc3f7; color: #0a0e1a; border: 0; padding: 6px 12px;
+               font-family: inherit; cursor: pointer; border-radius: 3px; margin-top: 4px; }
+      #sentinels { font-size: 11px; color: #7a8396; }
+      .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 6px; }
+    </style>
+  </head>
+  <body>
+    <h1>yt-brain Live Observer</h1>
+    <div class="row"><span>backend</span><span id="backend-status" class="bad">…</span></div>
+    <div class="row"><span>videos indexed</span><span id="video-count">—</span></div>
+    <div class="row"><span>mode</span><span id="mode">—</span></div>
+    <div id="sentinels" style="margin-top:8px"></div>
+
+    <label style="display:block; margin-top:12px">API base URL</label>
+    <input id="api-base" value="http://127.0.0.1:11811" />
+    <button id="save">save</button>
+    <div id="saved" class="ok" style="display:none">saved ✓</div>
+    <script src="popup.js"></script>
+  </body>
+</html>

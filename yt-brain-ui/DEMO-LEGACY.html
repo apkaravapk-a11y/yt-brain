@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>yt-brain Ω++ — Live Demo</title>
+  <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+  <style>
+    :root {
+      --bg: #0a0e1a; --panel: #11172a; --accent: #4fc3f7; --accent2: #ffb86c;
+      --text: #e7eaf0; --dim: #7a8396; --border: #1c2440; --green: #58e6a7;
+      --red: #ff6b6b; --yellow: #f7d86b;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: ui-monospace, Consolas, "SF Mono", monospace;
+           background: var(--bg); color: var(--text); overflow: hidden; }
+    .app { display: grid; grid-template-columns: 260px 1fr 340px;
+           grid-template-rows: 48px 1fr; height: 100vh; width: 100vw; gap: 1px;
+           background: var(--border); }
+    header { grid-column: 1 / -1; background: var(--panel); display: flex; align-items: center;
+             padding: 0 16px; gap: 16px; font-weight: 600; letter-spacing: 0.5px; }
+    header .brand { color: var(--accent); }
+    header .mode { color: var(--accent2); margin-left: auto; font-size: 13px; }
+    header .mode select { background: var(--panel); color: var(--accent2); border: 1px solid var(--border);
+                          padding: 4px 8px; border-radius: 3px; font-family: inherit; }
+    nav { background: var(--panel); padding: 16px 0; }
+    nav .section { color: var(--dim); font-size: 11px; padding: 12px 16px 4px; text-transform: uppercase; }
+    nav a { display: block; padding: 8px 16px; color: var(--text); text-decoration: none;
+            border-left: 2px solid transparent; cursor: pointer; font-size: 13px; }
+    nav a:hover, nav a.active { background: var(--border); border-left-color: var(--accent); }
+    main { background: var(--bg); overflow: hidden; position: relative; }
+    aside { background: var(--panel); padding: 16px; overflow-y: auto; font-size: 12px; }
+    aside h3 { margin-top: 0; color: var(--accent); font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; }
+    aside .consent { background: var(--bg); border: 1px solid var(--border); padding: 10px;
+                     margin-bottom: 8px; border-radius: 3px; }
+    aside .consent .action { color: var(--accent2); font-weight: 600; }
+    aside .consent .p { float: right; color: var(--dim); }
+    aside .consent .btns { margin-top: 8px; display: flex; gap: 4px; }
+    aside .consent button { flex: 1; background: var(--border); color: var(--text); border: none;
+                            padding: 4px; font-family: inherit; font-size: 11px; cursor: pointer; border-radius: 2px; }
+    aside .consent button:hover { background: var(--accent); color: var(--bg); }
+    aside .event { color: var(--dim); padding: 4px 0; border-bottom: 1px solid var(--border); font-size: 11px; }
+    aside .event .ts { color: var(--accent); }
+
+    /* Pages */
+    .page { position: absolute; inset: 0; display: none; overflow-y: auto; padding: 16px; }
+    .page.active { display: block; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+    .card { background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 10px; cursor: pointer; }
+    .card:hover { border-color: var(--accent); }
+    .card .thumb { height: 112px; background: linear-gradient(135deg, #333, #111); border-radius: 3px; margin-bottom: 8px;
+                   display: flex; align-items: center; justify-content: center; color: var(--dim); font-size: 11px; }
+    .card .title { font-size: 12px; margin: 0 0 4px; }
+    .card .ch { color: var(--dim); font-size: 11px; }
+    .card .pills { margin-top: 6px; display: flex; gap: 4px; flex-wrap: wrap; }
+    .pill { font-size: 10px; padding: 2px 6px; border-radius: 10px; background: var(--border); color: var(--dim); }
+    .pill.trusted { background: var(--green); color: var(--bg); }
+    .pill.caution { background: var(--yellow); color: var(--bg); }
+    .pill.live { background: var(--red); color: var(--bg); }
+
+    /* Galaxy */
+    #galaxy-canvas { width: 100%; height: 100%; display: block; }
+    #galaxy-overlay { position: absolute; top: 16px; left: 16px; background: rgba(10,14,26,0.85);
+                      padding: 8px 12px; border: 1px solid var(--border); font-size: 11px; }
+    #galaxy-overlay .k { color: var(--dim); }
+    #galaxy-overlay .v { color: var(--accent); }
+
+    /* Status */
+    .status-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .metric { background: var(--panel); border: 1px solid var(--border); padding: 16px; border-radius: 4px; }
+    .metric .label { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .metric .value { font-size: 24px; color: var(--accent); margin-top: 4px; }
+    .metric .trend { color: var(--green); font-size: 11px; }
+    .status-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 12px; }
+    .status-row .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+    .status-row .dot.off { background: var(--red); }
+    .status-row .dot.warn { background: var(--yellow); }
+
+    /* Copilot */
+    .copilot { display: flex; flex-direction: column; height: 100%; }
+    .copilot .viewport { flex: 1; background: var(--panel); border: 1px solid var(--border); border-radius: 4px;
+                         padding: 16px; overflow-y: auto; font-family: ui-monospace, monospace; font-size: 12px; }
+    .copilot .chat { margin-top: 12px; display: flex; gap: 8px; }
+    .copilot .chat input { flex: 1; background: var(--panel); color: var(--text); border: 1px solid var(--border);
+                           padding: 8px; font-family: inherit; border-radius: 3px; }
+    .copilot .chat button { background: var(--accent); color: var(--bg); border: none; padding: 8px 16px;
+                            font-family: inherit; cursor: pointer; border-radius: 3px; }
+    .copilot .stream .line { padding: 2px 0; }
+    .copilot .stream .tag { color: var(--accent); }
+
+    /* Mode themes */
+    body.mode-minority { --accent: #ff6bd6; --accent2: #bfa; }
+    body.mode-ops { --accent: #ffa726; --accent2: #e7eaf0; --bg: #000; }
+    body.mode-samantha { --accent: #f48fb1; --accent2: #ffd54f; }
+    body.mode-mentat { --accent: #90caf9; --accent2: #90caf9; }
+    body.mode-scholar { --accent: #c5e1a5; --accent2: #fff59d; }
+
+    footer { position: fixed; bottom: 0; left: 0; right: 0; background: var(--panel); border-top: 1px solid var(--border);
+             padding: 4px 16px; font-size: 11px; color: var(--dim); display: flex; gap: 16px; z-index: 100; }
+    footer .ok { color: var(--green); }
+  </style>
+</head>
+<body class="mode-jarvis">
+  <div class="app">
+    <header>
+      <span class="brand">yt-brain</span>
+      <span style="color:var(--dim); font-size:12px">Ω++ · Precision 5560 · T1200 4GB · 64GB</span>
+      <span class="mode">
+        mode:
+        <select id="mode-select">
+          <option value="jarvis">Jarvis</option>
+          <option value="minority">Minority</option>
+          <option value="ops">Ops</option>
+          <option value="samantha">Samantha</option>
+          <option value="mentat">Mentat</option>
+          <option value="scholar">Scholar</option>
+        </select>
+      </span>
+    </header>
+    <nav>
+      <div class="section">Faces</div>
+      <a data-page="home" class="active">Home</a>
+      <a data-page="galaxy">3D Galaxy</a>
+      <a data-page="copilot">Live Co-Pilot</a>
+      <a data-page="inbox">Inbox</a>
+      <a data-page="comments">Comments Explorer</a>
+      <a data-page="status">Status / Ops</a>
+      <div class="section">Learn</div>
+      <a data-page="consent-inbox">Consent Inbox</a>
+      <a data-page="windows">Consent Windows</a>
+      <a data-page="replay">Web Replay</a>
+      <div class="section">Meta</div>
+      <a data-page="modes">Mode Theater</a>
+    </nav>
+    <main>
+      <div class="page active" id="page-home">
+        <h2 style="margin-top:0">Home feed</h2>
+        <p style="color:var(--dim);font-size:12px">Ingested surfaces: API + Takeout + Ψ-home + Ψ-subs + Ψ-history. Sort: most-relevant-to-me.</p>
+        <div class="grid" id="home-grid"></div>
+      </div>
+      <div class="page" id="page-galaxy">
+        <div id="galaxy-overlay">
+          <div><span class="k">videos</span> <span class="v" id="g-n">0</span></div>
+          <div><span class="k">projection</span> <span class="v">UMAP-3D</span></div>
+          <div><span class="k">rotate</span> <span class="v">drag</span> <span class="k">zoom</span> <span class="v">wheel</span></div>
+        </div>
+        <canvas id="galaxy-canvas"></canvas>
+      </div>
+      <div class="page" id="page-copilot">
+        <div class="copilot">
+          <div class="viewport">
+            <div style="color:var(--dim);margin-bottom:8px">Λ — browser Live Co-Pilot stream (simulated).</div>
+            <div id="copilot-stream" class="stream"></div>
+          </div>
+          <div class="chat">
+            <input id="copilot-in" placeholder="Direct Λ: 'open my YouTube home and add top 3 to Watch Later'" />
+            <button onclick="copilotSend()">Send</button>
+          </div>
+        </div>
+      </div>
+      <div class="page" id="page-inbox">
+        <h2 style="margin-top:0">Inbox — overnight extracts</h2>
+        <p style="color:var(--dim);font-size:12px">Ranked by Π predicted-yes × technique-confidence. Dashboard of 3 cards with Apply / Snooze / Reject.</p>
+        <div id="inbox-list"></div>
+      </div>
+      <div class="page" id="page-comments">
+        <h2 style="margin-top:0">Comments Explorer</h2>
+        <input id="comment-q" placeholder="search your harvested comments..." style="width:100%;background:var(--panel);color:var(--text);border:1px solid var(--border);padding:8px;font-family:inherit;margin-bottom:12px" oninput="filterComments()" />
+        <div id="comments-list"></div>
+      </div>
+      <div class="page" id="page-status">
+        <h2 style="margin-top:0">Status / Ops</h2>
+        <div class="status-grid">
+          <div class="metric"><div class="label">videos indexed</div><div class="value" id="m-videos">0</div><div class="trend">phase 1 ready</div></div>
+          <div class="metric"><div class="label">web events (Ψ)</div><div class="value" id="m-events">0</div><div class="trend">phase 1.5 live</div></div>
+          <div class="metric"><div class="label">Π ask rate (7d)</div><div class="value">—</div><div class="trend">phase 8.5 trains this</div></div>
+          <div class="metric"><div class="label">yt-ai router</div><div class="value" style="color:var(--green)">ok</div><div class="trend">ollama:ready · stub:ok</div></div>
+        </div>
+        <h3 style="color:var(--accent);margin-top:24px">Sentinel kill-switches</h3>
+        <div id="sentinels"></div>
+        <h3 style="color:var(--accent);margin-top:24px">Backends</h3>
+        <div class="status-row"><span class="dot"></span> ollama (127.0.0.1:11434) <span style="color:var(--dim);margin-left:auto">detected</span></div>
+        <div class="status-row"><span class="dot off"></span> anthropic_cloud <span style="color:var(--dim);margin-left:auto">no ANTHROPIC_API_KEY</span></div>
+        <div class="status-row"><span class="dot"></span> stub (fallback) <span style="color:var(--dim);margin-left:auto">always available</span></div>
+      </div>
+      <div class="page" id="page-consent-inbox">
+        <h2 style="margin-top:0">Consent Inbox — Π decisions needing you</h2>
+        <div id="consent-queue"></div>
+      </div>
+      <div class="page" id="page-windows">
+        <h2 style="margin-top:0">Consent Windows — d-escape hatches</h2>
+        <p style="color:var(--dim);font-size:12px">Session-scoped permission ceilings. Dry-run preview before open. Auto-close on time or count.</p>
+        <div id="windows-list"></div>
+        <button style="margin-top:12px;background:var(--accent);color:var(--bg);border:none;padding:8px 16px;font-family:inherit;cursor:pointer;border-radius:3px" onclick="simulateOpenWindow()">+ Open window: like for 30 min (max 3)</button>
+      </div>
+      <div class="page" id="page-replay">
+        <h2 style="margin-top:0">Web Replay — travel back in your feed</h2>
+        <input type="range" min="0" max="30" value="0" id="replay-slider" oninput="renderReplay()" style="width:100%" />
+        <div id="replay-date" style="color:var(--dim);font-size:12px;margin:8px 0"></div>
+        <div class="grid" id="replay-grid"></div>
+      </div>
+      <div class="page" id="page-modes">
+        <h2 style="margin-top:0">Mode Theater — 6 modes × 22 sci-fi references</h2>
+        <div id="modes-table"></div>
+      </div>
+    </main>
+    <aside>
+      <h3>Π — Consent stream</h3>
+      <div id="consent-stream"></div>
+      <h3 style="margin-top:16px">Notify hub events</h3>
+      <div id="notify-stream"></div>
+    </aside>
+  </div>
+  <footer>
+    <span class="ok">●</span> yt-brain core up · <span class="ok">●</span> yt-ai router ok ·
+    <span>plan: idempotent-crafting-fern.md</span> ·
+    <span>spec: 2026-04-22-yt-brain-omega-plus-final-design.md</span> ·
+    <span style="margin-left:auto">17 phases · Ξ Λ Ψ Π Ω Tachi</span>
+  </footer>
+
+<script>
+/* -------- demo data -------- */
+const VIDEOS = [
+  {id:"a1", title:"RAG with LlamaIndex — hybrid retrieval", ch:"AI Daily", pills:["trusted","AI"], topic:0},
+  {id:"a2", title:"Agentic workflows in production", ch:"AI Daily", pills:["trusted","AI"], topic:0},
+  {id:"a3", title:"Building a personal coding agent", ch:"Hamel Husain", pills:["trusted","AI"], topic:0},
+  {id:"a4", title:"Minimal Ollama setup on Windows", ch:"Local AI", pills:["trusted","setup"], topic:1},
+  {id:"a5", title:"Fine-tuning Qwen2.5 with LoRA", ch:"Trelis Research", pills:["trusted","LoRA"], topic:0},
+  {id:"b1", title:"3D scatter with three.js", ch:"Bruno Simon", pills:["3D","trusted"], topic:2},
+  {id:"b2", title:"React Three Fiber basics", ch:"Codrops", pills:["3D","UI"], topic:2},
+  {id:"b3", title:"UMAP explained", ch:"StatQuest", pills:["trusted","math"], topic:3},
+  {id:"c1", title:"Playwright persistent profiles", ch:"TestDev", pills:["auto","caution"], topic:4},
+  {id:"c2", title:"Chrome DevTools Protocol deep dive", ch:"Steve Kinney", pills:["auto"], topic:4},
+  {id:"d1", title:"Weekly home feed 2026-04-22", ch:"Ψ-harvest", pills:["live"], topic:5},
+  {id:"d2", title:"Trending — AI Agents this week", ch:"Ψ-trending", pills:["live"], topic:5},
+];
+const COMMENTS = [
+  {v:"a1", author:"@mleng", body:"the hybrid reranker bit at 14:22 is gold. Using it at work now."},
+  {v:"a1", author:"@daisy", body:"does this scale past 100k docs? curious about memory"},
+  {v:"a3", author:"@builder", body:"can we run this on a T1200 laptop?"},
+  {v:"b1", author:"@threejs_fan", body:"bruno's particle trick works beautifully here"},
+  {v:"a5", author:"@researcher", body:"for the LoRA part: peft + bitsandbytes works on 4GB if you use q4"},
+];
+const PENDING = [
+  {id:"q1", action:"like", target:"RAG with LlamaIndex — hybrid retrieval", p:0.72, reasons:["channel trust 0.88","matched your embed project"]},
+  {id:"q2", action:"save_to_playlist", target:"Fine-tuning Qwen2.5 with LoRA", p:0.81, reasons:["similar to 4 watched","+18% eval on last adapter"]},
+];
+
+/* -------- home grid -------- */
+function renderHome(){
+  document.getElementById("home-grid").innerHTML = VIDEOS.map(v=>`
+    <div class="card" onclick="watch('${v.id}')">
+      <div class="thumb">${v.title.split(" ").slice(0,3).join(" ")}</div>
+      <div class="title">${v.title}</div>
+      <div class="ch">${v.ch}</div>
+      <div class="pills">${v.pills.map(p=>`<span class="pill ${p}">${p}</span>`).join("")}</div>
+    </div>`).join("");
+  document.getElementById("m-videos").textContent = VIDEOS.length;
+}
+function watch(id){ alert("Watch page for "+id+" (Phase 7 stub)"); }
+
+/* -------- galaxy -------- */
+let gs = {};
+function renderGalaxy(){
+  const canvas = document.getElementById("galaxy-canvas");
+  const main = document.getElementById("page-galaxy");
+  const w = main.clientWidth, h = main.clientHeight;
+  canvas.width = w; canvas.height = h;
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0a0e1a);
+  const camera = new THREE.PerspectiveCamera(60, w/h, 0.1, 1000);
+  camera.position.z = 8;
+  const renderer = new THREE.WebGLRenderer({canvas, antialias:true});
+  renderer.setSize(w, h);
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
+
+  // points — simulate UMAP clusters by topic
+  const geometry = new THREE.BufferGeometry();
+  const pos = [], col = [], sizes = [];
+  const topicPal = [[0.31,0.76,0.97],[1.0,0.72,0.42],[1.0,0.42,0.84],[0.35,0.90,0.65],[1.0,0.42,0.42],[0.94,0.85,0.42]];
+  const totalPts = 240;
+  for (let i=0;i<totalPts;i++){
+    const topic = i % 6;
+    const cx = Math.cos(topic * Math.PI/3) * 3;
+    const cy = Math.sin(topic * Math.PI/3) * 3;
+    const cz = (topic - 2.5) * 1.5;
+    pos.push(cx + (Math.random()-0.5)*1.2);
+    pos.push(cy + (Math.random()-0.5)*1.2);
+    pos.push(cz + (Math.random()-0.5)*1.2);
+    col.push(topicPal[topic][0], topicPal[topic][1], topicPal[topic][2]);
+    sizes.push(0.08 + Math.random()*0.1);
+  }
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  geometry.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+  const mat = new THREE.PointsMaterial({size:0.12, vertexColors:true, sizeAttenuation:true});
+  const points = new THREE.Points(geometry, mat);
+  scene.add(points);
+  document.getElementById("g-n").textContent = totalPts;
+
+  // simple drag rotation
+  let drag = null, rx=0, ry=0;
+  canvas.addEventListener("mousedown", e => drag = {x:e.clientX,y:e.clientY,rx,ry});
+  canvas.addEventListener("mouseup", () => drag = null);
+  canvas.addEventListener("mousemove", e => {
+    if (!drag) return;
+    ry = drag.ry + (e.clientX - drag.x) * 0.01;
+    rx = drag.rx + (e.clientY - drag.y) * 0.01;
+  });
+  canvas.addEventListener("wheel", e => { camera.position.z = Math.max(3, Math.min(20, camera.position.z + e.deltaY*0.01)); e.preventDefault(); });
+  function loop(){
+    points.rotation.y = ry || points.rotation.y + 0.001;
+    points.rotation.x = rx;
+    renderer.render(scene, camera);
+    gs.frame = requestAnimationFrame(loop);
+  }
+  if (gs.frame) cancelAnimationFrame(gs.frame);
+  loop();
+}
+
+/* -------- co-pilot stream -------- */
+const STREAM_LINES = [
+  ["browser.goto", "https://youtube.com/"],
+  ["browser.read_dom", "a11y tree: 42 tiles"],
+  ["harvest.home", "captured 20 video tiles, 3 shelves"],
+  ["video.upsert", "3 new, 17 existing (skipped)"],
+  ["psi.harvest_history", "rank-over-time recorded for 20 ids"],
+  ["consent.decide", "like(a1) → p=0.72 → ask"],
+  ["browser.screenshot", "C:/browsers/screenshots/1745558400.png"],
+  ["yt-ai.embed", "nomic-embed-text → 768d × 20"],
+  ["storage.upsert", "faiss index +20 vectors"],
+  ["umap.incremental", "3D positions updated"],
+  ["notify.push", "Windows toast: 3 new candidates in inbox"],
+];
+function copilotSend(){
+  const inp = document.getElementById("copilot-in");
+  addStream("chat", "you: " + inp.value);
+  inp.value = "";
+}
+function addStream(tag, text){
+  const el = document.getElementById("copilot-stream");
+  const line = document.createElement("div");
+  line.className = "line";
+  line.innerHTML = `<span class="tag">[${tag}]</span> ${text}`;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+let streamIdx = 0;
+setInterval(() => {
+  const [tag, text] = STREAM_LINES[streamIdx % STREAM_LINES.length];
+  addStream(tag, text);
+  streamIdx++;
+  if (streamIdx === STREAM_LINES.length) {
+    document.getElementById("m-events").textContent = String(parseInt(document.getElementById("m-events").textContent)+20);
+  }
+}, 2200);
+
+/* -------- consent stream (sidebar) -------- */
+function addConsent(action, target, p){
+  const box = document.getElementById("consent-stream");
+  const el = document.createElement("div");
+  el.className = "consent";
+  el.innerHTML = `
+    <div><span class="action">${action}</span><span class="p">p=${p.toFixed(2)}</span></div>
+    <div style="color:var(--dim);margin-top:4px">${target}</div>
+    <div class="btns"><button onclick="this.parentNode.parentNode.remove()">allow</button><button onclick="this.parentNode.parentNode.remove()">deny</button><button onclick="this.parentNode.parentNode.remove()">defer</button></div>`;
+  box.insertBefore(el, box.firstChild);
+}
+setTimeout(()=>{ addConsent("like","RAG with LlamaIndex",0.72); }, 800);
+setTimeout(()=>{ addConsent("save_to_playlist","Fine-tuning Qwen2.5 with LoRA",0.81); }, 2400);
+
+/* -------- notify stream -------- */
+function addNotify(msg){
+  const el = document.getElementById("notify-stream");
+  const line = document.createElement("div");
+  line.className = "event";
+  const ts = new Date().toISOString().split("T")[1].slice(0,5);
+  line.innerHTML = `<span class="ts">${ts}</span> ${msg}`;
+  el.insertBefore(line, el.firstChild);
+}
+setTimeout(()=>{ addNotify("Π: 2 decisions pending"); }, 1500);
+setTimeout(()=>{ addNotify("Ψ: home feed harvested (20 tiles)"); }, 3500);
+setTimeout(()=>{ addNotify("yt-ai: embed call · nomic-embed-text · 120ms"); }, 5000);
+setTimeout(()=>{ addNotify("Tachi-3: journal entry added"); }, 7000);
+
+/* -------- inbox, comments, consent-inbox, windows, replay, modes -------- */
+function renderInbox(){
+  document.getElementById("inbox-list").innerHTML = VIDEOS.slice(0,3).map(v=>`
+    <div style="background:var(--panel);border:1px solid var(--border);padding:12px;margin-bottom:8px;border-radius:4px">
+      <div style="color:var(--accent);font-weight:600">${v.title}</div>
+      <div style="color:var(--dim);font-size:11px;margin:4px 0">${v.ch} · conf 0.${70+Math.floor(Math.random()*25)} · 5 files in diff</div>
+      <pre style="background:var(--bg);padding:8px;border-radius:3px;font-size:11px;margin:8px 0;overflow:auto">+ from llama_index import VectorStoreIndex\n+ from llama_index.retrievers import HybridRetriever\n- # old single-retriever code</pre>
+      <div style="display:flex;gap:4px"><button style="background:var(--green);color:var(--bg);border:0;padding:4px 10px;cursor:pointer;border-radius:2px;font-family:inherit">apply</button><button style="background:var(--border);color:var(--text);border:0;padding:4px 10px;cursor:pointer;border-radius:2px;font-family:inherit">snooze</button><button style="background:var(--red);color:var(--bg);border:0;padding:4px 10px;cursor:pointer;border-radius:2px;font-family:inherit">reject</button></div>
+    </div>`).join("");
+}
+function renderComments(list){
+  document.getElementById("comments-list").innerHTML = list.map(c=>`
+    <div style="background:var(--panel);border:1px solid var(--border);padding:10px;margin-bottom:6px;border-radius:3px">
+      <div style="font-size:11px;color:var(--dim)">${c.author} · video ${c.v}</div>
+      <div>${c.body}</div>
+    </div>`).join("");
+}
+function filterComments(){
+  const q = document.getElementById("comment-q").value.toLowerCase();
+  renderComments(COMMENTS.filter(c => !q || c.body.toLowerCase().includes(q) || c.author.toLowerCase().includes(q)));
+}
+function renderConsentInbox(){
+  document.getElementById("consent-queue").innerHTML = PENDING.map(q=>`
+    <div style="background:var(--panel);border:1px solid var(--border);padding:12px;margin-bottom:8px;border-radius:4px">
+      <div><b style="color:var(--accent2)">${q.action}</b> on <span>${q.target}</span> <span style="float:right;color:var(--dim)">Π p=${q.p.toFixed(2)}</span></div>
+      <ul style="color:var(--dim);font-size:11px">${q.reasons.map(r=>`<li>${r}</li>`).join("")}</ul>
+      <div><button style="background:var(--green);color:var(--bg);border:0;padding:4px 10px;cursor:pointer;border-radius:2px;font-family:inherit">allow</button> <button style="background:var(--red);color:var(--bg);border:0;padding:4px 10px;cursor:pointer;border-radius:2px;font-family:inherit">deny</button> <button style="background:var(--border);color:var(--text);border:0;padding:4px 10px;cursor:pointer;border-radius:2px;font-family:inherit">allow all similar</button></div>
+    </div>`).join("");
+}
+let WINDOWS = [];
+function renderWindows(){
+  if (WINDOWS.length === 0) { document.getElementById("windows-list").innerHTML = "<div style='color:var(--dim);font-size:12px'>(no open windows — resting in wide-floor)</div>"; return; }
+  document.getElementById("windows-list").innerHTML = WINDOWS.map(w => `
+    <div style="background:var(--panel);border:1px solid var(--accent);padding:12px;margin-bottom:8px;border-radius:4px">
+      <div><b style="color:var(--accent)">${w.action}</b> — ${w.used}/${w.max} used · ${w.expiresIn}</div>
+      <div style="color:var(--dim);font-size:11px">Dry-run preview: ${w.previews.join(" · ")}</div>
+    </div>`).join("");
+}
+function simulateOpenWindow(){
+  WINDOWS.push({action:"like", used:0, max:3, expiresIn:"29m 56s",
+    previews:["RAG explainer (p=0.84)","Qwen-coder LoRA talk (p=0.92)","Agentic RAG demo (p=0.88)"]});
+  renderWindows();
+}
+function renderReplay(){
+  const d = parseInt(document.getElementById("replay-slider").value);
+  const today = new Date(); today.setDate(today.getDate() - d);
+  document.getElementById("replay-date").textContent = d === 0 ? "today" : `${d} days ago (${today.toISOString().split('T')[0]})`;
+  // shuffle a copy of VIDEOS deterministically by d
+  const shuffled = [...VIDEOS].sort((a,b)=> ((a.id.charCodeAt(1)+d) % 7) - ((b.id.charCodeAt(1)+d) % 7));
+  document.getElementById("replay-grid").innerHTML = shuffled.slice(0,8).map(v=>`
+    <div class="card"><div class="thumb">${v.title.split(" ").slice(0,3).join(" ")}</div><div class="title">${v.title}</div><div class="ch">${v.ch}</div></div>`).join("");
+}
+const MODE_TABLE = [
+  {name:"jarvis", persona:"ambient second-brain, proactive, witty-dry", refs:"#1 Jarvis · #5 HAL · #8 Cortana · #18 POI-Machine", th:"0.90/0.10"},
+  {name:"minority", persona:"spatial navigator, gesture-first", refs:"#2 Minority Report · #10 GitS-dive · #22 Arrival", th:"0.92/0.08"},
+  {name:"ops", persona:"mission control, dense dashboards, no chatter", refs:"#3 Westworld · #15 Neuromancer-tui · #19 LCARS", th:"0.95/0.05"},
+  {name:"samantha", persona:"warm voice companion, relational", refs:"#4 Her · #7 Samantha · #13 love-letter", th:"0.90/0.10"},
+  {name:"mentat", persona:"accuracy-first, citations-only, no synthesis", refs:"#17 Dune-Mentat · #20 Voight-Kampff", th:"0.98/0.02"},
+  {name:"scholar", persona:"cross-referenced lectures, long-horizon", refs:"#12 Westworld-Maze · #16 Librarian · #21 Foundation", th:"0.90/0.10"},
+];
+function renderModes(){
+  document.getElementById("modes-table").innerHTML = MODE_TABLE.map(m=>`
+    <div style="background:var(--panel);border:1px solid var(--border);padding:12px;margin-bottom:8px;border-radius:4px">
+      <div><b style="color:var(--accent)">${m.name}</b> <span style="color:var(--dim);font-size:11px;margin-left:8px">Π thresholds ${m.th}</span></div>
+      <div style="margin:4px 0">${m.persona}</div>
+      <div style="color:var(--dim);font-size:11px">refs: ${m.refs}</div>
+      <button onclick="setMode('${m.name}')" style="margin-top:6px;background:var(--border);color:var(--accent);border:1px solid var(--border);padding:4px 10px;cursor:pointer;border-radius:2px;font-family:inherit">activate</button>
+    </div>`).join("");
+}
+function renderSentinels(){
+  const sents = ["brainstorm-off","consent-pause","browser-halt","notify-off","halt-all","thermal-pause"];
+  document.getElementById("sentinels").innerHTML = sents.map(s => `
+    <div class="status-row"><span class="dot off"></span> <code>C:/docs/.${s}</code> <span style="color:var(--dim);margin-left:auto">absent (normal)</span></div>`).join("");
+}
+
+/* -------- navigation -------- */
+document.querySelectorAll("nav a").forEach(a => a.onclick = () => {
+  document.querySelectorAll("nav a").forEach(x => x.classList.remove("active"));
+  a.classList.add("active");
+  document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
+  document.getElementById("page-" + a.dataset.page).classList.add("active");
+  if (a.dataset.page === "galaxy") renderGalaxy();
+});
+document.getElementById("mode-select").onchange = e => setMode(e.target.value);
+function setMode(name){
+  document.body.className = "mode-" + name;
+  document.getElementById("mode-select").value = name;
+  addNotify(`mode → ${name}`);
+}
+
+/* -------- boot -------- */
+renderHome();
+renderInbox();
+renderComments(COMMENTS);
+renderConsentInbox();
+renderWindows();
+renderReplay();
+renderModes();
+renderSentinels();
+</script>
+</body>
+</html>

@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "yt-brain Live Observer",
+  "version": "0.1.0",
+  "description": "Sends every YouTube watch page you visit to your local yt-brain backend — L live-tab capture (Phase 12 of Ω++).",
+  "permissions": ["activeTab", "storage", "tabs"],
+  "host_permissions": [
+    "*://*.youtube.com/*",
+    "http://127.0.0.1:11811/*"
+  ],
+  "action": {
+    "default_title": "yt-brain",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.youtube.com/watch*", "*://*.youtube.com/"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
