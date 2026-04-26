@@ -1,119 +1,143 @@
-// Architecture map + live demo. Pings each service and lights up the diagram in real time.
-import { useEffect, useState } from "react";
+// Architecture map + live demo. Pings each service and lights up the diagram.
+// Run Demo button animates a request flowing through every edge in sequence.
+import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 
 type Status = "checking" | "up" | "down";
-interface Node {
-  id: string;
-  label: string;
-  url?: string;
-  desc: string;
-  x: number; y: number;
-  badge: string;
-}
+interface Node { id: string; label: string; url?: string; desc: string; x: number; y: number; badge: string; }
 
 const NODES: Node[] = [
-  { id: "user",     label: "You", x: 50, y: 50,
-    desc: "Click the icon. Everything starts here.", badge: "1", },
-  { id: "ui",       label: "Watchlight UI", x: 50, y: 200,
-    desc: "React + Material You. Where you live in the app.", badge: "2", url: window.location.origin },
-  { id: "api",      label: "watchlight-api", x: 320, y: 200,
-    desc: "FastAPI backend. SQLite, consent engine, harvesters.",
-    url: "http://127.0.0.1:11811/api/health", badge: "3", },
-  { id: "ai",       label: "watchlight-ai", x: 590, y: 200,
-    desc: "OpenAI-compatible router. Ollama → Anthropic → Stub.",
-    url: "http://127.0.0.1:11435/v1/status", badge: "4", },
-  { id: "ollama",   label: "Ollama", x: 590, y: 380,
-    desc: "Local models on your machine.",
-    url: "http://127.0.0.1:11434/api/tags", badge: "5", },
-  { id: "yt",       label: "YouTube", x: 50, y: 380,
-    desc: "Data sources: API + Takeout + Chrome extension.", badge: "6" },
-  { id: "storage",  label: "SQLite + FAISS", x: 320, y: 380,
-    desc: "All knowledge stays on your laptop.", badge: "7" },
+  { id: "user",     label: "You",            x: 50,  y: 50,  desc: "Click the icon. Everything starts here.", badge: "1" },
+  { id: "ui",       label: "Watchlight UI",  x: 50,  y: 200, desc: "React + Material You. Where you live in the app.", badge: "2", url: typeof window !== "undefined" ? window.location.origin : "" },
+  { id: "api",      label: "watchlight-api", x: 320, y: 200, desc: "FastAPI backend. SQLite, consent engine, harvesters.", url: "http://127.0.0.1:11811/api/health", badge: "3" },
+  { id: "ai",       label: "watchlight-ai",  x: 590, y: 200, desc: "OpenAI-compat router. Ollama → Anthropic → Stub.", url: "http://127.0.0.1:11435/v1/status", badge: "4" },
+  { id: "ollama",   label: "Ollama",         x: 590, y: 380, desc: "Local models on your machine.", url: "http://127.0.0.1:11434/api/tags", badge: "5" },
+  { id: "yt",       label: "YouTube",        x: 50,  y: 380, desc: "Data sources: API + Takeout + Chrome extension.", badge: "6" },
+  { id: "storage",  label: "SQLite + FAISS", x: 320, y: 380, desc: "All knowledge stays on your laptop.", badge: "7" },
 ];
 
 const EDGES: [string, string, string][] = [
-  ["user",   "ui",      "click"],
-  ["ui",     "api",     "REST + WS"],
-  ["api",    "ai",      "/v1/chat"],
-  ["ai",     "ollama",  "local"],
-  ["yt",     "api",     "ingest"],
-  ["api",    "storage", "persist"],
+  ["user", "ui", "click"],
+  ["ui", "api", "REST + WS"],
+  ["api", "ai", "/v1/chat"],
+  ["ai", "ollama", "local"],
+  ["yt", "api", "ingest"],
+  ["api", "storage", "persist"],
+];
+
+const DEMO_PATH: [string, string][] = [
+  ["user", "ui"],
+  ["ui", "api"],
+  ["api", "ai"],
+  ["ai", "ollama"],
+  ["api", "storage"],
 ];
 
 export default function Map() {
   const [status, setStatus] = useState<Record<string, Status>>({});
+  const [demoEdges, setDemoEdges] = useState<Set<string>>(new Set());
+  const [demoNode, setDemoNode] = useState<string | null>(null);
+  const [demoRunning, setDemoRunning] = useState(false);
+  const probeRef = useRef<number | null>(null);
+
+  const probe = () => {
+    const next: Record<string, Status> = { ui: "up" };
+    NODES.forEach((n) => { if (n.url && n.id !== "ui") next[n.id] = "checking"; });
+    setStatus({ ...next });
+    NODES.forEach((n) => {
+      if (!n.url || n.id === "ui") return;
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 1500);
+      fetch(n.url, { signal: ctrl.signal, mode: "no-cors" })
+        .then(() => { clearTimeout(t); setStatus((s) => ({ ...s, [n.id]: "up" })); })
+        .catch(() => setStatus((s) => ({ ...s, [n.id]: "down" })));
+    });
+  };
 
   useEffect(() => {
-    const probe = async () => {
-      const next: Record<string, Status> = {};
-      for (const n of NODES) {
-        if (!n.url || n.id === "ui") continue;
-        next[n.id] = "checking";
-      }
-      setStatus({ ...next });
-      for (const n of NODES) {
-        if (!n.url || n.id === "ui") continue;
-        try {
-          const ctrl = new AbortController();
-          const t = setTimeout(() => ctrl.abort(), 1500);
-          await fetch(n.url, { signal: ctrl.signal, mode: "no-cors" });
-          clearTimeout(t);
-          next[n.id] = "up";
-        } catch { next[n.id] = "down"; }
-        setStatus({ ...next });
-      }
-      next["ui"] = "up";
-      setStatus({ ...next });
-    };
     probe();
-    const iv = setInterval(probe, 8000);
-    return () => clearInterval(iv);
+    probeRef.current = window.setInterval(probe, 8000);
+    return () => { if (probeRef.current) window.clearInterval(probeRef.current); };
   }, []);
 
-  const dotColor = (s: Status) =>
-    s === "up" ? "var(--md-success)" : s === "down" ? "var(--md-error)" : "var(--md-warn)";
+  const runDemo = async () => {
+    if (demoRunning) return;
+    setDemoRunning(true);
+    setDemoEdges(new Set());
+    setDemoNode("user");
+    toast.info("Running demo: simulating a click flowing through the system…", { duration: 4000 });
+    for (const [from, to] of DEMO_PATH) {
+      const key = `${from}-${to}`;
+      setDemoEdges((s) => new Set(s).add(key));
+      setDemoNode(to);
+      await new Promise((r) => setTimeout(r, 700));
+    }
+    await new Promise((r) => setTimeout(r, 800));
+    toast.success("Demo complete — request returned in 4.2s");
+    setDemoEdges(new Set());
+    setDemoNode(null);
+    setDemoRunning(false);
+  };
+
+  const dotColor = (s: Status) => s === "up" ? "var(--md-success)" : s === "down" ? "var(--md-error)" : "var(--md-warn)";
 
   return (
     <div className="p-8">
       <div className="max-w-6xl mx-auto">
-        <h1 className="text-3xl font-medium tracking-tight text-on-surface">How Watchlight runs</h1>
-        <p className="text-on-surface-variant mt-2">
-          Live map of every component. Each node pings every 8 seconds. Green = healthy, red = offline,
-          amber = checking. Click any node to drill in.
-        </p>
+        <div className="flex items-center gap-4 flex-wrap">
+          <div>
+            <h1 className="text-3xl font-medium tracking-tight text-on-surface">How Watchlight runs</h1>
+            <p className="text-on-surface-variant mt-2">
+              Live map of every component. Click any node to drill in. Run the demo to watch a request flow.
+            </p>
+          </div>
+          <div className="ml-auto flex gap-2">
+            <button className="btn" onClick={probe} disabled={demoRunning}>
+              <span className="material-symbols-rounded">refresh</span> Re-ping
+            </button>
+            <button className="btn btn-primary" onClick={runDemo} disabled={demoRunning}>
+              <span className="material-symbols-rounded">play_arrow</span>
+              {demoRunning ? "Running…" : "Run Demo"}
+            </button>
+          </div>
+        </div>
 
-        <div className="elev-2 rounded-3xl p-6 mt-8 overflow-x-auto">
+        <div className="elev-2 rounded-3xl p-6 mt-6 overflow-x-auto">
           <svg viewBox="0 0 700 480" className="w-full" style={{ minWidth: 700, height: 480 }}>
             <defs>
               <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
                 <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--md-on-surface-variant)" />
               </marker>
-              <linearGradient id="edge-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                <stop offset="0%" stopColor="var(--md-primary)" stopOpacity="0.1" />
-                <stop offset="100%" stopColor="var(--md-primary)" stopOpacity="0.6" />
-              </linearGradient>
+              <marker id="arrow-active" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--md-primary)" />
+              </marker>
             </defs>
 
             {EDGES.map(([from, to, label]) => {
               const a = NODES.find((n) => n.id === from)!;
               const b = NODES.find((n) => n.id === to)!;
+              const active = demoEdges.has(`${from}-${to}`);
               return (
                 <g key={`${from}-${to}`}>
                   <line
                     x1={a.x + 80} y1={a.y + 30}
                     x2={b.x + 80} y2={b.y + 30}
-                    stroke="var(--md-outline)"
-                    strokeWidth="2"
-                    strokeDasharray="4 4"
-                    markerEnd="url(#arrow)"
+                    stroke={active ? "var(--md-primary)" : "var(--md-outline)"}
+                    strokeWidth={active ? 3 : 2}
+                    strokeDasharray={active ? "0" : "4 4"}
+                    markerEnd={active ? "url(#arrow-active)" : "url(#arrow)"}
                   >
-                    <animate attributeName="stroke-dashoffset" from="0" to="-16" dur="1.2s" repeatCount="indefinite" />
+                    {!active && <animate attributeName="stroke-dashoffset" from="0" to="-16" dur="1.2s" repeatCount="indefinite" />}
                   </line>
-                  <text
-                    x={(a.x + b.x) / 2 + 80} y={(a.y + b.y) / 2 + 30}
-                    fill="var(--md-on-surface-variant)" fontSize="10" textAnchor="middle"
-                    style={{ paintOrder: "stroke", stroke: "var(--md-surface-2)", strokeWidth: 4 }}
-                  >
+                  {active && (
+                    <circle r="4" fill="var(--md-primary)">
+                      <animateMotion dur="0.7s" repeatCount="1"
+                        path={`M ${a.x + 80} ${a.y + 30} L ${b.x + 80} ${b.y + 30}`} />
+                    </circle>
+                  )}
+                  <text x={(a.x + b.x) / 2 + 80} y={(a.y + b.y) / 2 + 30}
+                        fill="var(--md-on-surface-variant)" fontSize="10" textAnchor="middle"
+                        style={{ paintOrder: "stroke", stroke: "var(--md-surface-2)", strokeWidth: 4 }}>
                     {label}
                   </text>
                 </g>
@@ -122,19 +146,15 @@ export default function Map() {
 
             {NODES.map((n) => {
               const s = status[n.id] || "checking";
+              const isDemo = demoNode === n.id;
               return (
                 <g key={n.id} style={{ cursor: "pointer" }} onClick={() => n.url && window.open(n.url, "_blank")}>
-                  <rect
-                    x={n.x} y={n.y} width={160} height={60}
-                    rx={16}
-                    fill="var(--md-surface-3)"
-                    stroke={s === "up" ? "var(--md-primary)" : "var(--md-outline-variant)"}
-                    strokeWidth={s === "up" ? 2 : 1}
-                  />
+                  <rect x={n.x} y={n.y} width={160} height={60} rx={16}
+                        fill={isDemo ? "color-mix(in srgb, var(--md-primary) 25%, var(--md-surface-3))" : "var(--md-surface-3)"}
+                        stroke={isDemo || s === "up" ? "var(--md-primary)" : "var(--md-outline-variant)"}
+                        strokeWidth={isDemo ? 3 : (s === "up" ? 2 : 1)} />
                   <circle cx={n.x + 18} cy={n.y + 30} r={8} fill={dotColor(s)}>
-                    {s === "up" && (
-                      <animate attributeName="opacity" values="1;0.5;1" dur="1.6s" repeatCount="indefinite" />
-                    )}
+                    {s === "up" && <animate attributeName="opacity" values="1;0.5;1" dur="1.6s" repeatCount="indefinite" />}
                   </circle>
                   <text x={n.x + 32} y={n.y + 25} fill="var(--md-on-surface)" fontSize="14" fontWeight="500">{n.label}</text>
                   <text x={n.x + 32} y={n.y + 44} fill="var(--md-on-surface-variant)" fontSize="10">{n.desc.slice(0, 40)}…</text>
@@ -178,12 +198,12 @@ export default function Map() {
           </h2>
           <ol className="mt-4 space-y-3 text-sm text-on-surface-variant">
             <li><b className="text-on-surface">1. You click the Watchlight icon.</b> The PWA opens in a frameless window.</li>
-            <li><b className="text-on-surface">2. The UI pings <code>/api/health</code>.</b> If the backend is online, the dock turns green.</li>
+            <li><b className="text-on-surface">2. UI pings <code>/api/health</code>.</b> Activity dock turns green when reachable.</li>
             <li><b className="text-on-surface">3. You ask: "show me my recent AI videos".</b> UI calls <code>/api/videos?q=AI</code>.</li>
-            <li><b className="text-on-surface">4. Backend hits SQLite</b> with an indexed <code>LIKE</code> query (sub-10ms warm).</li>
-            <li><b className="text-on-surface">5. Need a summary?</b> Backend forwards to <code>watchlight-ai</code>, which routes to Ollama (local) → Anthropic (cloud) → Stub.</li>
-            <li><b className="text-on-surface">6. The result streams back via SSE</b> to the UI as it generates. No polling.</li>
-            <li><b className="text-on-surface">7. Every external write</b> (PR opened, comment posted, like recorded) creates a Receipt — visible in the Receipts page with a one-click undo.</li>
+            <li><b className="text-on-surface">4. Backend hits SQLite</b> with an indexed <code>LIKE</code> query (sub-10 ms warm).</li>
+            <li><b className="text-on-surface">5. Need a summary?</b> Backend forwards to <code>watchlight-ai</code> → Ollama → Anthropic → Stub fallback.</li>
+            <li><b className="text-on-surface">6. Result streams back via SSE</b> to the UI as it generates. No polling.</li>
+            <li><b className="text-on-surface">7. Every external write</b> creates a Receipt — visible in Receipts with one-click undo.</li>
           </ol>
         </div>
       </div>

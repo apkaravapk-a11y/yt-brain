@@ -5,6 +5,8 @@ import { useModeStore, useUIStore } from "./lib/store";
 import CommandPalette from "./components/CommandPalette";
 import ActivityDock from "./components/ActivityDock";
 import Wizard from "./components/Wizard";
+import Shortcuts from "./components/Shortcuts";
+import ErrorBoundary from "./components/ErrorBoundary";
 
 const Home = lazy(() => import("./pages/Home"));
 const Watch = lazy(() => import("./pages/Watch"));
@@ -72,24 +74,27 @@ export default function App() {
       <Sidebar />
       <main className="overflow-y-auto bg-surface relative">
         <TopBar />
-        <Suspense fallback={<PageSkel />}>
-          <div className="page-enter">
-            <Routes>
-              <Route path="/" element={<Home />} />
-              <Route path="/watch/:id" element={<Watch />} />
-              <Route path="/galaxy" element={<Galaxy />} />
-              <Route path="/copilot" element={<CoPilot />} />
-              <Route path="/inbox" element={<Inbox />} />
-              <Route path="/comments" element={<Comments />} />
-              <Route path="/replay" element={<Replay />} />
-              <Route path="/modes" element={<Modes />} />
-              <Route path="/receipts" element={<Receipts />} />
-              <Route path="/map" element={<Map />} />
-              <Route path="/settings" element={<Settings />} />
-              <Route path="/help" element={<Help />} />
-            </Routes>
-          </div>
-        </Suspense>
+        <ErrorBoundary>
+          <Suspense fallback={<PageSkel />}>
+            <div className="page-enter">
+              <Routes>
+                <Route path="/" element={<Home />} />
+                <Route path="/watch/:id" element={<Watch />} />
+                <Route path="/galaxy" element={<Galaxy />} />
+                <Route path="/copilot" element={<CoPilot />} />
+                <Route path="/inbox" element={<Inbox />} />
+                <Route path="/comments" element={<Comments />} />
+                <Route path="/replay" element={<Replay />} />
+                <Route path="/modes" element={<Modes />} />
+                <Route path="/receipts" element={<Receipts />} />
+                <Route path="/map" element={<Map />} />
+                <Route path="/settings" element={<Settings />} />
+                <Route path="/help" element={<Help />} />
+              </Routes>
+            </div>
+          </Suspense>
+        </ErrorBoundary>
+        <Shortcuts />
         <button
           className="fab"
           onClick={() => setPaletteOpen(true)}

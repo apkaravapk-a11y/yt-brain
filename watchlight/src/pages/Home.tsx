@@ -32,11 +32,22 @@ export default function Home() {
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
+    const tagMap: Record<string, RegExp | null> = {
+      All: null,
+      AI: /\b(rag|agent|llm|qwen|llama|gpt|ai|fine-tune)\b/i,
+      Code: /\b(code|coding|playwright|cdp|api|chrome devtools)\b/i,
+      Design: /\b(design|3d|three|react three|umap|scatter)\b/i,
+      Live: /^psi_|live|trending/i,
+      Music: /\b(music|song|album|artist)\b/i,
+      Tutorials: /\b(tutorial|how to|guide|setup|build|build a|setup)\b/i,
+    };
+    const re = tagMap[filter];
     return videos.filter((v) => {
       if (needle && !`${v.title} ${v.channel_name}`.toLowerCase().includes(needle)) return false;
+      if (re && !(re.test(v.title) || re.test(v.channel_name) || re.test(v.source))) return false;
       return true;
     });
-  }, [videos, q]);
+  }, [videos, q, filter]);
 
   const hero = filtered.slice(0, 3);
   const rest = filtered.slice(3);

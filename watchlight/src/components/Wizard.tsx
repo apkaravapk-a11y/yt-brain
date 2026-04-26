@@ -168,28 +168,43 @@ function StepOllama() {
 }
 
 function StepYouTube() {
+  const [picked, setPicked] = useState<string | null>(null);
+  const opts = [
+    { id: "google", icon: "login", title: "Sign in with Google", text: "Real OAuth — pulls subscriptions, liked, watch later. Read-only." },
+    { id: "takeout", icon: "upload_file", title: "Drop a Google Takeout zip", text: "Get a complete history without OAuth. Most thorough." },
+    { id: "extension", icon: "extension", title: "Use the Chrome extension", text: "Streams every video you watch, in real time." },
+  ];
   return (
     <div className="max-w-xl mx-auto">
       <div className="text-2xl font-medium text-on-surface mb-2">Bring in your data</div>
       <p className="text-on-surface-variant mb-6">Three ways. Pick one — the others can come later.</p>
       <div className="space-y-3">
-        {[
-          { icon: "login", title: "Sign in with Google", text: "Real OAuth — pulls subscriptions, liked, watch later. Read-only." },
-          { icon: "upload_file", title: "Drop a Google Takeout zip", text: "Get a complete history without OAuth. Most thorough." },
-          { icon: "extension", title: "Use the Chrome extension", text: "Streams every video you watch, in real time." },
-        ].map((c) => (
-          <button key={c.title} className="w-full text-left elev-2 rounded-2xl p-5 hover:elev-3 transition-all">
+        {opts.map((c) => (
+          <button
+            key={c.id}
+            onClick={() => setPicked(c.id)}
+            className={"w-full text-left rounded-2xl p-5 transition-all border " +
+              (picked === c.id ? "glow" : "border-outline-variant elev-2 hover:elev-3")}
+            style={picked === c.id ? { borderColor: "var(--md-primary)", background: "var(--md-surface-3)" } : {}}
+          >
             <div className="flex items-center gap-4">
               <span className="material-symbols-rounded text-primary" style={{ fontSize: 28 }}>{c.icon}</span>
               <div className="flex-1">
                 <div className="font-medium text-on-surface">{c.title}</div>
                 <div className="text-xs text-on-surface-variant mt-0.5">{c.text}</div>
               </div>
-              <span className="material-symbols-rounded text-on-surface-variant">chevron_right</span>
+              <span className="material-symbols-rounded text-on-surface-variant">
+                {picked === c.id ? "check_circle" : "chevron_right"}
+              </span>
             </div>
           </button>
         ))}
       </div>
+      {picked && (
+        <div className="mt-4 text-xs text-on-surface-variant text-center">
+          Selected: <span className="text-primary capitalize">{picked}</span>. Change anytime in Settings.
+        </div>
+      )}
     </div>
   );
 }
