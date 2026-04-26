@@ -59,39 +59,47 @@ function Wait-ForHealth($url, $maxSec = 30) {
     return $false
 }
 
-function Start-Bg($name, $cmd, $args, $workdir, $logfile) {
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = $cmd
-    foreach ($a in $args) { [void]$psi.ArgumentList.Add($a) }
-    $psi.WorkingDirectory = $workdir
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    $psi.UseShellExecute = $false
-    $psi.CreateNoWindow = $true
-    $p = [System.Diagnostics.Process]::new()
-    $p.StartInfo = $psi
-    $p.EnableRaisingEvents = $true
-    [void]$p.Start()
-    # Stream both stdout and stderr to the log file in the background.
-    $log = $logfile
-    $job = Start-Job -ArgumentList $p.Id, $log -ScriptBlock {
-        param($procId, $logPath)
-        $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
-        if ($proc -eq $null) { return }
-        # Just sleep — the parent already redirected; this job exists only to keep a handle.
+# Find the actual process listening on a port — the source of truth.
+# Returns the PID + every descendant PID (so stop.ps1 can kill the whole tree).
+# IMPORTANT: builds an in-memory parent→children map with ONE WMI call. The
+# previous version did a Get-CimInstance per PID and could hang for minutes
+# under AV scanning.
+function Get-PortOwners($port) {
+    $owners = @()
+    $conn = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
+    if (-not $conn) { return @() }
+
+    # One WMI call, build parent→children map.
+    $procs = Get-CimInstance Win32_Process -Property ProcessId, ParentProcessId -ErrorAction SilentlyContinue
+    $childrenOf = @{}
+    foreach ($p in $procs) {
+        $parentPid = [int]$p.ParentProcessId
+        if (-not $childrenOf.ContainsKey($parentPid)) {
+            $childrenOf[$parentPid] = @()
+        }
+        $childrenOf[$parentPid] += [int]$p.ProcessId
     }
-    # Pipe outputs asynchronously to the log file.
-    $logStream = [System.IO.StreamWriter]::new($logfile, $true)
-    $logStream.AutoFlush = $true
-    Register-ObjectEvent -InputObject $p -EventName "OutputDataReceived" -Action {
-        if ($Event.SourceEventArgs.Data -ne $null) { $Event.MessageData.WriteLine($Event.SourceEventArgs.Data) }
-    } -MessageData $logStream | Out-Null
-    Register-ObjectEvent -InputObject $p -EventName "ErrorDataReceived" -Action {
-        if ($Event.SourceEventArgs.Data -ne $null) { $Event.MessageData.WriteLine($Event.SourceEventArgs.Data) }
-    } -MessageData $logStream | Out-Null
-    $p.BeginOutputReadLine()
-    $p.BeginErrorReadLine()
-    return $p
+
+    foreach ($c in $conn) {
+        $rootPid = [int]$c.OwningProcess
+        if (-not $rootPid) { continue }
+        $owners += $rootPid
+        $stack = [System.Collections.Generic.Stack[int]]::new()
+        $stack.Push($rootPid)
+        $seen = @{ $rootPid = $true }
+        while ($stack.Count -gt 0) {
+            $cur = $stack.Pop()
+            if ($childrenOf.ContainsKey($cur)) {
+                foreach ($k in $childrenOf[$cur]) {
+                    if ($seen.ContainsKey($k)) { continue }
+                    $seen[$k] = $true
+                    $owners += $k
+                    $stack.Push($k)
+                }
+            }
+        }
+    }
+    return ($owners | Select-Object -Unique)
 }
 
 function Save-Pids($pids) {
@@ -167,75 +175,71 @@ if (-not (Test-Path $FIRST_RUN)) {
     "first-run complete: $(Get-Date -Format o)" | Set-Content $FIRST_RUN
 }
 
-# ── 3. Backend (yt-brain FastAPI on 11811) ───────────────────────────────
-Write-Step "▶" "yt-brain backend"
+# Resolve binaries up front (used by every service block).
+$venvPython = "C:\Users\apkar\Desktop\projects\claudecode\.venv\Scripts\python.exe"
+if (-not (Test-Path $venvPython)) { $venvPython = "python" }
+$npmCmd = "C:\Program Files\nodejs\npm.cmd"
+if (-not (Test-Path $npmCmd)) { $npmCmd = "npm" }
+
+# Inline boot pattern (no scriptblock indirection — variables resolve correctly).
 $pids = @{}
+
+# ── 3. Backend (11811) ──
+Write-Step "▶" "yt-brain backend"
 if (Test-Port 11811) {
-    Write-Substep "already running on 11811 ✓"
+    Write-Substep "already running on 11811 ✓ — adopting"
 } else {
     Write-Substep "booting on http://127.0.0.1:11811…"
-    $venvPython = "C:\Users\apkar\Desktop\projects\claudecode\.venv\Scripts\python.exe"
-    if (-not (Test-Path $venvPython)) { $venvPython = "python" }
-    $p = Start-Process -FilePath $venvPython `
+    Start-Process -FilePath $venvPython `
         -ArgumentList "-m", "uvicorn", "yt_brain.api.server:app", "--host", "127.0.0.1", "--port", "11811" `
         -WorkingDirectory "$ROOT\yt-brain" `
         -WindowStyle Hidden `
         -RedirectStandardOutput "$LOG_DIR\backend.log" `
-        -RedirectStandardError  "$LOG_DIR\backend.err" `
-        -PassThru
-    $pids["backend"] = $p.Id
-    if (Wait-ForHealth "http://127.0.0.1:11811/api/status" 20) {
-        Write-Substep "ready ✓ (pid $($p.Id))"
-    } else {
+        -RedirectStandardError  "$LOG_DIR\backend.err" | Out-Null
+    if (-not (Wait-ForHealth "http://127.0.0.1:11811/api/health" 30)) {
         Write-Substep "WARN: backend slow — check $LOG_DIR\backend.err"
     }
 }
+$pids["backend"] = Get-PortOwners 11811
+Write-Substep "ready ✓ (tracked pids: $($pids['backend'] -join ', '))"
 
-# ── 4. yt-ai router (11435) ──────────────────────────────────────────────
+# ── 4. yt-ai (11435) ──
 Write-Step "▶" "yt-ai router"
 if (Test-Port 11435) {
-    Write-Substep "already running on 11435 ✓"
+    Write-Substep "already running on 11435 ✓ — adopting"
 } else {
     Write-Substep "booting on http://127.0.0.1:11435…"
-    $venvPython = "C:\Users\apkar\Desktop\projects\claudecode\.venv\Scripts\python.exe"
-    if (-not (Test-Path $venvPython)) { $venvPython = "python" }
-    $p = Start-Process -FilePath $venvPython `
+    Start-Process -FilePath $venvPython `
         -ArgumentList "-m", "uvicorn", "yt_ai.server:app", "--host", "127.0.0.1", "--port", "11435" `
         -WorkingDirectory "$ROOT\yt-ai" `
         -WindowStyle Hidden `
         -RedirectStandardOutput "$LOG_DIR\yt-ai.log" `
-        -RedirectStandardError  "$LOG_DIR\yt-ai.err" `
-        -PassThru
-    $pids["yt-ai"] = $p.Id
-    if (Wait-ForHealth "http://127.0.0.1:11435/v1/status" 15) {
-        Write-Substep "ready ✓ (pid $($p.Id))"
-    } else {
+        -RedirectStandardError  "$LOG_DIR\yt-ai.err" | Out-Null
+    if (-not (Wait-ForHealth "http://127.0.0.1:11435/v1/status" 20)) {
         Write-Substep "WARN: yt-ai slow — check $LOG_DIR\yt-ai.err"
     }
 }
+$pids["yt-ai"] = Get-PortOwners 11435
+Write-Substep "ready ✓ (tracked pids: $($pids['yt-ai'] -join ', '))"
 
-# ── 5. UI (Vite dev on 5173) ─────────────────────────────────────────────
+# ── 5. UI (5173) ──
 Write-Step "▶" "yt-brain UI"
 if (Test-Port 5173) {
-    Write-Substep "already running on 5173 ✓"
+    Write-Substep "already running on 5173 ✓ — adopting"
 } else {
     Write-Substep "booting Vite on http://127.0.0.1:5173…"
-    $npmCmd = "C:\Program Files\nodejs\npm.cmd"
-    if (-not (Test-Path $npmCmd)) { $npmCmd = "npm" }
-    $p = Start-Process -FilePath $npmCmd `
+    Start-Process -FilePath $npmCmd `
         -ArgumentList "run", "dev", "--", "--host", "127.0.0.1", "--port", "5173" `
         -WorkingDirectory "$ROOT\yt-brain-ui" `
         -WindowStyle Hidden `
         -RedirectStandardOutput "$LOG_DIR\ui.log" `
-        -RedirectStandardError  "$LOG_DIR\ui.err" `
-        -PassThru
-    $pids["ui"] = $p.Id
-    if (Wait-ForHealth "http://127.0.0.1:5173/" 30) {
-        Write-Substep "ready ✓ (pid $($p.Id))"
-    } else {
+        -RedirectStandardError  "$LOG_DIR\ui.err" | Out-Null
+    if (-not (Wait-ForHealth "http://127.0.0.1:5173/" 30)) {
         Write-Substep "WARN: UI slow — check $LOG_DIR\ui.err"
     }
 }
+$pids["ui"] = Get-PortOwners 5173
+Write-Substep "ready ✓ (tracked pids: $($pids['ui'] -join ', '))"
 
 Save-Pids $pids
 
