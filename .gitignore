@@ -17,3 +17,5 @@ Thumbs.db
 .vite/
 .vercel/
 last_run.json
+yt-brain-launcher/state/
+yt-brain-launcher/logs/

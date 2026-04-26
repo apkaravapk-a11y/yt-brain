@@ -38,6 +38,25 @@ chat / dashboard / ambient / phone as one core with four faces.
 | `yt-brain-tests/` | Python | Master orchestrator + phase runbooks |
 | `swarm/` | Python + JSONL | Tachikoma agent journals + nightly dreamwalk |
 
+## One-click app-style launcher (Windows)
+
+```powershell
+# Install Desktop + Start Menu shortcuts (once):
+powershell -ExecutionPolicy Bypass -File yt-brain-launcher\install-shortcut.ps1
+```
+
+Then double-click **`yt-brain`** on your Desktop. The launcher boots Ollama,
+pulls embeddings, starts the backend (11811), yt-ai router (11435) and Vite UI
+(5173) in the background, waits until they're healthy, then opens your browser.
+
+| Shortcut | What it does |
+|---|---|
+| `yt-brain` | Single-click app launch (silent VBS — no console flash) |
+| `yt-brain stop` | Kills every yt-brain process and frees ports |
+| `yt-brain tray` | Lives in the system tray. Right-click for Open / Restart / Stop / Logs |
+
+See [yt-brain-launcher/README.md](yt-brain-launcher/README.md) for details.
+
 ## 5-minute local bring-up
 
 ```bash

@@ -142,6 +142,12 @@ class LiveVisitBody(BaseModel):
     ts: int | float | None = None
 
 
+@app.get("/api/health")
+def health() -> dict[str, Any]:
+    """Cheap liveness probe used by the launcher. No backend calls, just 'I am alive'."""
+    return {"ok": True, "ts": _now_iso(), "service": "yt-brain", "version": "0.2.0"}
+
+
 @app.get("/api/status")
 async def status() -> dict[str, Any]:
     repo = _get_repo()
