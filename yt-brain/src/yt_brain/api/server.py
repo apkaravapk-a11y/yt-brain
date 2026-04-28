@@ -282,6 +282,76 @@ async def ws_live(ws: WebSocket):
         hub.disconnect(ws)
 
 
+# ---------- Phase 18: agentic action endpoints ----------
+
+from ..agents.runtime import execute_plan, parse_intent, PlanStep
+from ..agents.audit import tail_audit
+from ..consent.policy import NAMESPACE_DEFAULTS
+
+HALT_PATH = Path("C:/docs/.halt-all")
+
+
+class IntentBody(BaseModel):
+    intent: str
+
+
+class StepBody(BaseModel):
+    op: str
+    params: dict
+    label: str = ""
+
+
+@app.post("/api/agent/plan")
+def agent_plan(body: IntentBody) -> dict[str, Any]:
+    """Turn an intent string into a concrete plan (sequence of steps)."""
+    steps = parse_intent(body.intent)
+    return {"intent": body.intent, "steps": [{"op": s.op, "params": s.params, "label": s.label} for s in steps]}
+
+
+@app.post("/api/agent/run")
+def agent_run(body: list[StepBody]) -> dict[str, Any]:
+    """Execute a plan, gating each step through Π."""
+    plan = [PlanStep(op=s.op, params=s.params, label=s.label) for s in body]
+    res = execute_plan(_policy, plan)
+    return res.to_dict()
+
+
+@app.post("/api/agent/halt")
+def agent_halt(body: dict | None = None) -> dict[str, Any]:
+    """Toggle the global halt-all sentinel."""
+    on = bool((body or {}).get("on", True))
+    HALT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    if on:
+        HALT_PATH.write_text(_now_iso(), encoding="utf-8")
+    else:
+        try:
+            HALT_PATH.unlink()
+        except FileNotFoundError:
+            pass
+    return {"halted": HALT_PATH.exists(), "ts": _now_iso()}
+
+
+@app.get("/api/agent/halt")
+def agent_halt_status() -> dict[str, Any]:
+    return {"halted": HALT_PATH.exists()}
+
+
+@app.get("/api/actions/list")
+def actions_list() -> dict[str, Any]:
+    """Catalog of every namespaced action key + its default decision."""
+    return {
+        "namespaces": [
+            {"key": k, "default": v} for k, v in sorted(NAMESPACE_DEFAULTS.items())
+        ],
+        "halted": HALT_PATH.exists(),
+    }
+
+
+@app.get("/api/audit/tail")
+def audit_tail(limit: int = 100) -> dict[str, Any]:
+    return {"entries": tail_audit(limit=int(limit))}
+
+
 # ---------- Static UI mount ----------
 
 if UI_DIST.exists():

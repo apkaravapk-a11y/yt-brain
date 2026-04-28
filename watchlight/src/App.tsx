@@ -7,6 +7,7 @@ import ActivityDock from "./components/ActivityDock";
 import Wizard from "./components/Wizard";
 import Shortcuts from "./components/Shortcuts";
 import ErrorBoundary from "./components/ErrorBoundary";
+import HaltPill from "./components/HaltPill";
 
 const Home = lazy(() => import("./pages/Home"));
 const Watch = lazy(() => import("./pages/Watch"));
@@ -20,11 +21,13 @@ const Settings = lazy(() => import("./pages/Settings"));
 const Help = lazy(() => import("./pages/Help"));
 const Receipts = lazy(() => import("./pages/Receipts"));
 const Map = lazy(() => import("./pages/Map"));
+const Actions = lazy(() => import("./pages/Actions"));
 
 const NAV = [
   { to: "/", label: "Home", icon: "home", end: true },
   { to: "/galaxy", label: "Galaxy", icon: "auto_awesome" },
   { to: "/copilot", label: "Co-Pilot", icon: "smart_toy" },
+  { to: "/actions", label: "Actions", icon: "rocket_launch" },
   { to: "/inbox", label: "Inbox", icon: "inbox" },
   { to: "/comments", label: "Comments", icon: "forum" },
   { to: "/replay", label: "Web Replay", icon: "history" },
@@ -88,6 +91,7 @@ export default function App() {
                 <Route path="/modes" element={<Modes />} />
                 <Route path="/receipts" element={<Receipts />} />
                 <Route path="/map" element={<Map />} />
+                <Route path="/actions" element={<Actions />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/help" element={<Help />} />
               </Routes>
@@ -106,6 +110,7 @@ export default function App() {
       </main>
       <CommandPalette />
       <ActivityDock />
+      <HaltPill />
       <Toaster
         position="top-right"
         theme="dark"
